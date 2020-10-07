@@ -1,0 +1,8 @@
+torch
+transformers==3.2
+pytorch-lightning
+gdown
+torch-scatter
+ujson
+redis
+msgpack
