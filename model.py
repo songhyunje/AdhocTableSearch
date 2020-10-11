@@ -39,10 +39,11 @@ class QueryTableMatcher(pl.LightningModule):
         target = torch.ones(nbatch, device=self.device)
         loss = self.criterion(tp_cos, tn_cos, target)
 
-        result = pl.TrainResult(minimize=loss)
+        # result = pl.TrainResult(minimize=loss)
         # lr_scheduler = self.trainer.lr_schedulers[0]["scheduler"]
-        result.log('train_loss', loss, on_epoch=True)
-        return result
+        # result.log('train_loss', loss, on_epoch=True)
+        self.log('train_loss', loss, on_epoch=True)
+        return {'loss': loss}
 
     def validation_step(self, batch, batch_idx):
         tp_cos, tn_cos = self(*batch)
@@ -50,9 +51,10 @@ class QueryTableMatcher(pl.LightningModule):
         target = torch.ones(nbatch, device=self.device)
         loss = self.criterion(tp_cos, tn_cos, target)
 
-        result = pl.EvalResult(checkpoint_on=loss)
-        result.log('val_loss', loss)
-        return result
+        # result = pl.EvalResult(checkpoint_on=loss)
+        # result.log('val_loss', loss)
+        self.log('val_loss', loss)
+        return {'val_loss': loss}
 
     # def validation_step_end(self, batch_parts):
     #     # do something with both outputs
