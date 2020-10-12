@@ -33,9 +33,7 @@ def train(args):
     )
 
     pl.seed_everything(args.seed)
-    data_module = QueryTableDataModule(train_batch_size=args.train_batch_size,
-                                       valid_batch_size=args.valid_batch_size,
-                                       test_batch_size=args.test_batch_size)
+    data_module = QueryTableDataModule(args)
 
     train_params = {}
     if args.gpus > 1:
@@ -57,6 +55,8 @@ def train(args):
 
 
 def add_generic_arguments(parser):
+    parser.add_argument("--data_dir", default=None, type=str, required=True,
+                        help="The input data dir.")
     parser.add_argument("--output_dir", default=None, type=str, required=True,
                         help="The output directory where the model predictions and checkpoints will be written.",
                         )
