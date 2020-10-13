@@ -235,9 +235,16 @@ class TableBertModel(nn.Module):
             for old_key, new_key in old_key_to_new_key_names:
                 state_dict[new_key] = state_dict[old_key]
 
-        # Problem: Missing key(s) in state_dict: "span_based_prediction.prediction.decoder.bias"
-        # model.load_state_dict(state_dict, strict=True)
-        model.load_state_dict(state_dict, strict=False)
+            # Problem: Missing key(s) in state_dict: "span_based_prediction.prediction.decoder.bias"
+            #코드 확인 결과  prediction.bias와 prediction.decoder.bias는 값을 공유함
+            state_dict['span_based_prediction.prediction.decoder.bias'] = state_dict['span_based_prediction.prediction.bias']
+            
+            # Problem: Mssing key(s) in state_dict: "_bert_model.bert.embeddings.position_ids"
+            #코드 확인 결과 이전 버전에서는 저장하지 않았던 값으로 None으로 두거나 값을 비워둘 경우 Missing key Error가 나기 때문에 내부에서 초기화해서 만들어 주는 방법과 같은 방법으로 만들어줌
+            state_dict["_bert_model.bert.embeddings.position_ids"] = torch.arange(config.max_position_embeddings).expand(1,-1)
+
+        model.load_state_dict(state_dict, strict=True)            
+        #model.load_state_dict(state_dict, strict=False)
 
         return model
 
