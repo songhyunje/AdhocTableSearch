@@ -16,7 +16,7 @@ def train(args):
     checkpoint_callback = pl.callbacks.ModelCheckpoint(
         filepath=args.output_dir,
         prefix="checkpoint",
-        monitor="val_loss",
+        monitor="val_loss",#val_loss
         verbose=True,
         mode="min",
         save_top_k=3
@@ -50,8 +50,8 @@ def train(args):
     if args.do_train:
         trainer.fit(model, data_module)
 
-    # if args.do_predict:
-    #     trainer.test()
+    if args.do_predict:
+        trainer.test()
 
 
 def add_generic_arguments(parser):

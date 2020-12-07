@@ -8,7 +8,7 @@ from transformers import AdamW, BertModel, get_linear_schedule_with_warmup
 
 from table_bert import TableBertModel
 
-
+# CLS Model
 class QueryTableMatcher(pl.LightningModule):
     def __init__(self, hparams):
         super().__init__()
@@ -18,20 +18,45 @@ class QueryTableMatcher(pl.LightningModule):
         self.criterion = nn.MarginRankingLoss(margin=1)
         self.avg_pooler = nn.AdaptiveAvgPool2d([1, 768])
 
-    def forward(self, q, pos_column, pos_caption, neg_column, neg_caption):
+    def forward(self, q, pos_column, pos_caption, neg_column=None, neg_caption=None):
         qCLS = self.Qmodel(**q)[1]
-
+        #print(pos_caption)# (,)
         context_encoding, column_encoding, _ = self.Tmodel.encode(contexts=pos_caption, tables=pos_column)
+        # 조합이
+        # 1. 더해주는데 누가 앞이냐
+        # 2. 각각을 simil값을 구하고 더하는건 어떤가
+        # 3. 각각을 구하고 max 값으로 생각하는건 어떤가
         tp_concat_encoding = self.avg_pooler(context_encoding) + self.avg_pooler(column_encoding)
         q_tp_cos = F.cosine_similarity(qCLS, tp_concat_encoding.squeeze(1))
 
-        context_encoding, column_encoding, _ = self.Tmodel.encode(contexts=neg_caption, tables=neg_column)
-        tn_concat_encoding = self.avg_pooler(context_encoding) + self.avg_pooler(column_encoding)
-        q_tn_cos = F.cosine_similarity(qCLS, tn_concat_encoding.squeeze(1))
+        if neg_column is None:
+            q_tn_cos = None
+        else:
+            context_encoding, column_encoding, _ = self.Tmodel.encode(contexts=neg_caption, tables=neg_column)
+            tn_concat_encoding = self.avg_pooler(context_encoding) + self.avg_pooler(column_encoding)
+            q_tn_cos = F.cosine_similarity(qCLS, tn_concat_encoding.squeeze(1))
         return q_tp_cos, q_tn_cos
 
-    def infer(self, q, table_column, table_caption):
-        pass
+    def infer(self, q, table_column, table_caption, qid, tidList):
+        # For predict
+        qCLS = self.Qmodel(**q)[1]
+        tableLen = len(tidList[0])
+
+        resultList = []
+        for i in range(tableLen):
+            context_encoding, column_encoding, _ = self.Tmodel.encode(contexts=(table_caption[0][i],), tables=(table_column[0][i],))
+            table_concat_encoding = self.avg_pooler(context_encoding) + self.avg_pooler(column_encoding)
+            q_t_cos = F.cosine_similarity(qCLS, table_concat_encoding.squeeze(1))
+            #print("{} , {} : {} ".format(qid[0], tidList[0][i], q_t_cos))
+            resultList.append([qid[0], tidList[0][i], str(abs(q_t_cos.item()))])
+        return resultList
+
+    def test_step(self, batch, batch_idx):
+        resultList = self.infer(*batch)
+        with open(self.hparams.output_file, 'a') as f:
+            for r in resultList:
+                f.write("{}\n".format(",".join(r)))
+
 
     def training_step(self, batch, batch_idx):
         tp_cos, tn_cos = self(*batch)
@@ -56,17 +81,9 @@ class QueryTableMatcher(pl.LightningModule):
         self.log('val_loss', loss)
         return {'val_loss': loss}
 
-    # def validation_step_end(self, batch_parts):
-    #     # do something with both outputs
-    #     return torch.mean(batch_parts.eval_loss)
 
-    # def test_step(self, batch, batch_idx):
-    #     seqs, labels = batch
-    #     preds = self(seqs)
-    #
-    #     result = pl.EvalResult()
-    #     result.log('mse', mse)
-    #     return result
+    def test_step_end(self, test_step_outputs):
+        pass
 
     @property
     def total_steps(self):
@@ -116,3 +133,4 @@ class QueryTableMatcher(pl.LightningModule):
         parser.add_argument("--train_batch_size", default=2, type=int, help="Number of training epochs")
         parser.add_argument("--valid_batch_size", default=2, type=int, help="Number of training epochs")
         parser.add_argument("--test_batch_size", default=2, type=int, help="Number of training epochs")
+        parser.add_argument("--output_file", default="./default.csv", type=str, help="output file name")

@@ -1,7 +1,7 @@
 # Model path
 model/
 *.ckpt
-__Pycache__/
+__pycache__/
 
 data/
 lightning_logs/

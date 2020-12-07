@@ -43,15 +43,24 @@ class QueryTableDataModule(pl.LightningDataModule):
             self.test = QueryTableDataset(data_dir=self.data_dir, data_type='test')
 
     def train_dataloader(self):
-        return DataLoader(self.train, batch_size=self.train_batch_size,
-                          shuffle=True, collate_fn=query_table_collate_fn)
+        return DataLoader(self.train,
+                          batch_size=self.train_batch_size,
+                          shuffle=True,
+                          collate_fn=query_table_collate_fn,
+                          num_workers=8)
 
     def val_dataloader(self):
-        return DataLoader(self.valid, batch_size=self.valid_batch_size,
-                          collate_fn=query_table_collate_fn)
+        return DataLoader(self.valid,
+                          batch_size=self.valid_batch_size,
+                          collate_fn=query_table_collate_fn,
+                          num_workers=8)
 
     def test_dataloader(self):
-        return DataLoader(self.test, batch_size=self.test_batch_size)
+        return DataLoader(self.test,
+                          batch_size=self.test_batch_size,
+                          collate_fn=query_table_collate_fn,
+                          num_workers=8
+                          )
 
 
 if __name__ == "__main__":
@@ -65,6 +74,6 @@ if __name__ == "__main__":
     data_module = QueryTableDataModule(args)
     data_module.prepare_data()
     data_module.setup('fit')
-    for batch in data_module.train_dataloader():
+    for batch in data_module.test_dataloader():
         print(batch[0])
         print(batch[1])
