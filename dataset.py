@@ -22,12 +22,13 @@ class QueryTableDataset(Dataset):
         self.data_type = data_type # test, train 구분하기위해
 
         if prepare and self.data_type.strip() == 'test':
-            self.prepare_test(data_dir, data_type, query_tokenizer, table_tokenizer, max_query_length)
+            self.prepare(data_dir, data_type, query_tokenizer, table_tokenizer, max_query_length)
         elif prepare:
             self.prepare(data_dir, data_type, query_tokenizer, table_tokenizer, max_query_length)
 
         self.query = torch.load(os.path.join(self.processed_folder, self.query_file))
-        self.pos_tables, self.neg_tables = torch.load(os.path.join(self.processed_folder, self.table_file))
+        #self.pos_tables, self.neg_tables = torch.load(os.path.join(self.processed_folder, self.table_file))
+        self.tables = torch.load(os.path.join(self.processed_folder, self.table_file))
 
     def __len__(self):
         return len(self.query)
@@ -35,7 +36,10 @@ class QueryTableDataset(Dataset):
     def __getitem__(self, index):
         # TODO: 아래 코드는 임시로 동작하기 위해 작동해둔 코드임. 반드시 향후에 수정해야할 부분
         qid = self.query[index][0]
-        pos_tables = self.pos_tables.get(qid, self.neg_tables.get(qid))
+        tables = self.tables.get(qid) #table inform, rel
+        tid, col_rep, cap_rep, rel_score = random.choice(tables)
+
+        '''
         if self.data_type == "test":
             # if Test:
             # return query, table_column, table_caption, qid, tid
@@ -45,9 +49,12 @@ class QueryTableDataset(Dataset):
             neg_column_rep = qid
             neg_caption_rep = tid1
         else:
-            tid1, pos_column_rep, pos_caption_rep = random.choice(pos_tables)
-            tid2, neg_column_rep, neg_caption_rep = random.choice(self.neg_tables[qid])
-        return self.query[index][1], pos_column_rep, pos_caption_rep, neg_column_rep, neg_caption_rep
+            tid1, pos_column_rep, pos_caption_rep, rel1 = random.choice(pos_tables)
+            tid2, neg_column_rep, neg_caption_rep, rel2 = random.choice(self.neg_tables[qid])
+        '''
+
+        #return self.query[index][1], pos_column_rep, pos_caption_rep, neg_column_rep, neg_caption_rep, [rel1, rel2]
+        return self.query[index][1], col_rep, cap_rep, rel_score
 
     def prepare_test(self, data_dir, data_type, query_tokenizer, table_tokenizer, max_query_length):
         # if Test:
@@ -136,6 +143,7 @@ class QueryTableDataset(Dataset):
         print('Processing...')
         query_dict = defaultdict()
         pos_tables, neg_tables = defaultdict(list), defaultdict(list)
+        tables = defaultdict(list)
 
         path = Path(data_dir + '/' + data_type + '.jsonl')
         with open(path) as f:
@@ -177,19 +185,23 @@ class QueryTableDataset(Dataset):
                                    header=[Column(h.strip(), 'text') for h in heading],
                                    data=body
                                    ).tokenize(table_tokenizer)
+                "안녕 [SEP] 안녕2 ?? 안녕 ' ' 안녕 "
                 caption = " ".join(heading) + " " + title + " " + secTitle + " " + caption
                 caption_rep = table_tokenizer.tokenize(caption)
-                if rel == '0':
-                    neg_tables[qid].append((tableId, column_rep, caption_rep))
-                else:
-                    pos_tables[qid].append((tableId, column_rep, caption_rep))
+                #if rel == '0':
+                #    neg_tables[qid].append((tableId, column_rep, caption_rep, rel))
+                #else:
+                #    pos_tables[qid].append((tableId, column_rep, caption_rep, rel))
+                tables[qid].append(( tableId, column_rep, caption_rep, torch.tensor(int(rel), dtype=torch.long)) )
 
         queries = [(k, v) for k, v in query_dict.items()]
-        tables = (pos_tables, neg_tables)
+        #tables = (pos_tables, neg_tables)
+        tables = tables
+
         with open(os.path.join(processed_dir, self.query_file), 'wb') as f:
-            torch.save(queries, f)
+            torch.save(queries, f) #query
         with open(os.path.join(processed_dir, self.table_file), 'wb') as f:
-            torch.save(tables, f)
+            torch.save(tables, f) #tabke information, rel_score
 
         print('Done!')
 
@@ -203,7 +215,7 @@ class QueryTableDataset(Dataset):
 
 
 def query_table_collate_fn(batch):
-    query, pos_column, pos_caption, neg_column, neg_caption = zip(*batch)
+    query, column, caption, rel = zip(*batch)
     input_ids, token_type_ids, attention_mask = [], [], []
     for q in query:
         input_ids.append(q["input_ids"].squeeze())
@@ -213,7 +225,7 @@ def query_table_collate_fn(batch):
     query = {"input_ids": torch.stack(input_ids),
              "token_type_ids": torch.stack(token_type_ids),
              "attention_mask": torch.stack(attention_mask)}
-    return query, pos_column, pos_caption, neg_column, neg_caption
+    return query, column, caption, rel
 
 
 if __name__ == "__main__":

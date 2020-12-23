@@ -74,6 +74,5 @@ if __name__ == "__main__":
     data_module = QueryTableDataModule(args)
     data_module.prepare_data()
     data_module.setup('fit')
-    for batch in data_module.test_dataloader():
-        print(batch[0])
-        print(batch[1])
+    for batch in data_module.train_dataloader():
+        print(*batch)

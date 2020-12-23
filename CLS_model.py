@@ -15,29 +15,29 @@ class QueryTableMatcher(pl.LightningModule):
         self.hparams = hparams
         self.Qmodel = BertModel.from_pretrained(self.hparams.bert_path)
         self.Tmodel = TableBertModel.from_pretrained(self.hparams.tabert_path)
-        #self.criterion = nn.MarginRankingLoss(margin=1)
-        self.criterion = nn.CrossEntropyLoss(weight=torch.tensor([0.1, 1.3, 1.1]))
+        self.criterion = nn.MarginRankingLoss(margin=1)
         self.avg_pooler = nn.AdaptiveAvgPool2d([1, 768])
-        self.classifier = nn.Sequential(
-            nn.Linear(768*2, 3),
-            nn.Softmax(dim=-1)
-        )
-    def forward(self, q, column, caption, rel_score=None):
-        qCLS = self.Qmodel(**q)[1] #b d
-        context_encoding, column_encoding, _ = self.Tmodel.encode(contexts=caption, tables=column)
-        tp_concat_encoding = self.avg_pooler(context_encoding) + self.avg_pooler(column_encoding) #b 1 d
-        q_tp_softmax = self.classifier(torch.cat([qCLS, tp_concat_encoding.squeeze(1)], dim=-1)) #2
 
-        if rel_score:  # for train
-            return q_tp_softmax, torch.tensor(rel_score).to("cuda")
-        else:  # for test
-            q_tp_label = torch.argmax(q_tp_softmax, dim=-1)
-            return q_tp_label
+    def forward(self, q, pos_column, pos_caption, neg_column=None, neg_caption=None):
+        qCLS = self.Qmodel(**q)[1]
+        #print(pos_caption)# (,)
+        context_encoding, column_encoding, _ = self.Tmodel.encode(contexts=pos_caption, tables=pos_column)
+        # 조합이
+        # 1. 더해주는데 누가 앞이냐
+        # 2. 각각을 simil값을 구하고 더하는건 어떤가
+        # 3. 각각을 구하고 max 값으로 생각하는건 어떤가
+        tp_concat_encoding = self.avg_pooler(context_encoding) + self.avg_pooler(column_encoding)
+        q_tp_cos = F.cosine_similarity(qCLS, tp_concat_encoding.squeeze(1))
 
+        if neg_column is None:
+            q_tn_cos = None
+        else:
+            context_encoding, column_encoding, _ = self.Tmodel.encode(contexts=neg_caption, tables=neg_column)
+            tn_concat_encoding = self.avg_pooler(context_encoding) + self.avg_pooler(column_encoding)
+            q_tn_cos = F.cosine_similarity(qCLS, tn_concat_encoding.squeeze(1))
+        return q_tp_cos, q_tn_cos
 
     def infer(self, q, table_column, table_caption, qid, tidList):
-        pass
-        """
         # For predict
         qCLS = self.Qmodel(**q)[1]
         tableLen = len(tidList[0])
@@ -50,26 +50,34 @@ class QueryTableMatcher(pl.LightningModule):
             #print("{} , {} : {} ".format(qid[0], tidList[0][i], q_t_cos))
             resultList.append([qid[0], tidList[0][i], str(abs(q_t_cos.item()))])
         return resultList
-        """
 
     def test_step(self, batch, batch_idx):
-        labeled = self(*batch)
-        q_tp_label = torch.argmax(labeled[0], dim=-1)
-        print(labeled, q_tp_label)
-        #with open(self.hparams.output_file, 'a') as f:
-        #    for r in resultList:
-        #        f.write("{}\n".format(",".join(r)))
+        resultList = self.infer(*batch)
+        with open(self.hparams.output_file, 'a') as f:
+            for r in resultList:
+                f.write("{}\n".format(",".join(r)))
 
 
     def training_step(self, batch, batch_idx):
-        tp_softmax, rel_score = self(*batch)
-        loss = self.criterion(tp_softmax, rel_score)
+        tp_cos, tn_cos = self(*batch)
+        nbatch = tp_cos.size(0)
+        target = torch.ones(nbatch, device=self.device)
+        loss = self.criterion(tp_cos, tn_cos, target)
+
+        # result = pl.TrainResult(minimize=loss)
+        # lr_scheduler = self.trainer.lr_schedulers[0]["scheduler"]
+        # result.log('train_loss', loss, on_epoch=True)
         self.log('train_loss', loss, on_epoch=True)
         return {'loss': loss}
 
     def validation_step(self, batch, batch_idx):
-        tp_softmax, rel_score = self(*batch)
-        loss = self.criterion(tp_softmax, rel_score)
+        tp_cos, tn_cos = self(*batch)
+        nbatch = tp_cos.size(0)
+        target = torch.ones(nbatch, device=self.device)
+        loss = self.criterion(tp_cos, tn_cos, target)
+
+        # result = pl.EvalResult(checkpoint_on=loss)
+        # result.log('val_loss', loss)
         self.log('val_loss', loss)
         return {'val_loss': loss}
 

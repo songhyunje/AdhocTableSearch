@@ -1,4 +1,5 @@
-EPOCH=7
+export CUDA_VISIBLE_DEVICES=1
+EPOCH=20
 SEED=20200401
 python trainer.py --data_dir ./data \
   --bert_path bert-base-uncased \
@@ -14,3 +15,4 @@ python trainer.py --data_dir ./data \
   --seed ${SEED} \
   --output_dir ./1201_5_E${EPOCH}_${SEED} \
   --output_file ./data/result1201_5_E${EPOCH}_${SEED}.csv \
+
