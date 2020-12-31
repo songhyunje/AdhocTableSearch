@@ -9,64 +9,68 @@ from transformers import AdamW, BertModel, get_linear_schedule_with_warmup
 from table_bert import TableBertModel
 
 
+# CLS Model
 class QueryTableMatcher(pl.LightningModule):
+
     def __init__(self, hparams):
         super().__init__()
         self.hparams = hparams
         self.Qmodel = BertModel.from_pretrained(self.hparams.bert_path)
         self.Tmodel = TableBertModel.from_pretrained(self.hparams.tabert_path)
-        self.criterion = nn.MarginRankingLoss(margin=1)
         self.avg_pooler = nn.AdaptiveAvgPool2d([1, 768])
 
-    def forward(self, q, pos_column, pos_caption, neg_column, neg_caption):
-        qCLS = self.Qmodel(**q)[1]
+    def nllloss(self, score, rel_score):
+        """
+        https://www.aclweb.org/anthology/2020.emnlp-main.550.pdf
+        TODO     : e^sim(q, tp)가 0일떄는 어떻게할까 == 모든 table들이 negative일떄
+        TODO Sol): 최대한 pos table 한개는 나오게끔 수정해야함
+        """
+        if not torch.sum(rel_score):
+            return torch.tensor([0.0], dtype=torch.float).requires_grad_(True).to("cuda")
+        # Rel == 0 => Negative의 score는 분자 계산에서 제외, score mask 진행
+        score_mask = torch.where(rel_score == 0, rel_score, score)
+        # e^0 == 1이라 0값이 아닌 인덱스만
+        positive_score = score_mask[torch.nonzero(score_mask, as_tuple=True)]
+        loss = -1 * torch.log( torch.sum(torch.exp(positive_score))
+                               / torch.sum(torch.exp(score)))
 
-        context_encoding, column_encoding, _ = self.Tmodel.encode(contexts=pos_caption, tables=pos_column)
+        return loss
+
+    def forward(self, q, column, caption, rel_score=None):
+        qCLS = self.Qmodel(**q)[1] #b d
+        context_encoding, column_encoding, _ = self.Tmodel.encode(contexts=caption, tables=column)
         tp_concat_encoding = self.avg_pooler(context_encoding) + self.avg_pooler(column_encoding)
         q_tp_cos = F.cosine_similarity(qCLS, tp_concat_encoding.squeeze(1))
-
-        context_encoding, column_encoding, _ = self.Tmodel.encode(contexts=neg_caption, tables=neg_column)
-        tn_concat_encoding = self.avg_pooler(context_encoding) + self.avg_pooler(column_encoding)
-        q_tn_cos = F.cosine_similarity(qCLS, tn_concat_encoding.squeeze(1))
-        return q_tp_cos, q_tn_cos
-
-    def infer(self, q, table_column, table_caption):
-        pass
+        if rel_score == None:
+            return q_tp_cos
+        else:
+            return q_tp_cos, rel_score
 
     def training_step(self, batch, batch_idx):
-        tp_cos, tn_cos = self(*batch)
-        nbatch = tp_cos.size(0)
-        target = torch.ones(nbatch, device=self.device)
-        loss = self.criterion(tp_cos, tn_cos, target)
-
-        # result = pl.TrainResult(minimize=loss)
-        # lr_scheduler = self.trainer.lr_schedulers[0]["scheduler"]
-        # result.log('train_loss', loss, on_epoch=True)
+        q, column, caption, rel_score, _, _ = batch
+        score, rel_score = self(q, column, caption, torch.tensor(rel_score, dtype=torch.float).to("cuda"))
+        loss = self.nllloss(score, rel_score)
         self.log('train_loss', loss, on_epoch=True)
         return {'loss': loss}
 
     def validation_step(self, batch, batch_idx):
-        tp_cos, tn_cos = self(*batch)
-        nbatch = tp_cos.size(0)
-        target = torch.ones(nbatch, device=self.device)
-        loss = self.criterion(tp_cos, tn_cos, target)
-
-        # result = pl.EvalResult(checkpoint_on=loss)
-        # result.log('val_loss', loss)
+        q, column, caption, rel_score, _, _ = batch
+        score, rel_score = self(q, column, caption, torch.tensor(rel_score, dtype=torch.float).to("cuda"))
+        loss = self.nllloss(score, rel_score)
         self.log('val_loss', loss)
-        return {'val_loss': loss}
+        return {'val_loss': loss.item()}
 
-    # def validation_step_end(self, batch_parts):
-    #     # do something with both outputs
-    #     return torch.mean(batch_parts.eval_loss)
+    def test_step(self, batch, batch_idx):
+        q, column, caption, _, qid, tid = batch
+        score = self(q, column, caption)
+        with open(self.hparams.output_file, 'a') as f:
+           f.write("{},{},{}\n".format(qid[0], tid[0], abs(score.item())))
 
-    # def test_step(self, batch, batch_idx):
-    #     seqs, labels = batch
-    #     preds = self(seqs)
-    #
-    #     result = pl.EvalResult()
-    #     result.log('mse', mse)
-    #     return result
+    def infer(self, q, table_column, table_caption, qid, tidList):
+        pass
+
+    def test_step_end(self, test_step_outputs):
+        pass
 
     @property
     def total_steps(self):
@@ -116,3 +120,4 @@ class QueryTableMatcher(pl.LightningModule):
         parser.add_argument("--train_batch_size", default=2, type=int, help="Number of training epochs")
         parser.add_argument("--valid_batch_size", default=2, type=int, help="Number of training epochs")
         parser.add_argument("--test_batch_size", default=2, type=int, help="Number of training epochs")
+        parser.add_argument("--output_file", default="./default.csv", type=str, help="output file name")

@@ -1,0 +1,10 @@
+# Model path
+model/
+*.ckpt
+__pycache__/
+*.csv
+
+data/
+lightning_logs/
+table_bert/__pycache__/
+table_bert/vertical/__pycache__/

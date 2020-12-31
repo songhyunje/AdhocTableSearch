@@ -6,3 +6,5 @@ torch-scatter
 ujson
 redis
 msgpack
+fairseq==0.10.0
+h5py
