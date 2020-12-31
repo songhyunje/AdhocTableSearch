@@ -56,7 +56,7 @@ class QueryTableDataModule(pl.LightningDataModule):
                           num_workers=8)
 
     def test_dataloader(self):
-        return DataLoader(self.test,
+        return DataLoader(QueryTableDataset(data_dir=self.data_dir, data_type='test'),
                           batch_size=self.test_batch_size,
                           collate_fn=query_table_collate_fn,
                           num_workers=8

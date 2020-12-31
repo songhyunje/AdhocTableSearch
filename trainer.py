@@ -14,7 +14,8 @@ logger = logging.getLogger(__name__)
 
 def train(args):
     checkpoint_callback = pl.callbacks.ModelCheckpoint(
-        filepath=args.output_dir,
+        dirpath=args.output_dir,
+        filename='{epoch:02d}-{val_loss:.2f}',
         prefix="checkpoint",
         monitor="val_loss",#val_loss
         verbose=True,
