@@ -8,71 +8,66 @@ from transformers import AdamW, BertModel, get_linear_schedule_with_warmup
 
 from table_bert import TableBertModel
 
+
 # CLS Model
 class QueryTableMatcher(pl.LightningModule):
+
     def __init__(self, hparams):
         super().__init__()
         self.hparams = hparams
         self.Qmodel = BertModel.from_pretrained(self.hparams.bert_path)
         self.Tmodel = TableBertModel.from_pretrained(self.hparams.tabert_path)
-        #self.criterion = nn.MarginRankingLoss(margin=1)
-        self.criterion = nn.CrossEntropyLoss(weight=torch.tensor([0.1, 1.3, 1.1]))
         self.avg_pooler = nn.AdaptiveAvgPool2d([1, 768])
-        self.classifier = nn.Sequential(
-            nn.Linear(768*2, 3),
-            nn.Softmax(dim=-1)
-        )
+
+    def nllloss(self, score, rel_score):
+        """
+        https://www.aclweb.org/anthology/2020.emnlp-main.550.pdf
+        TODO     : e^sim(q, tp)가 0일떄는 어떻게할까 == 모든 table들이 negative일떄
+        TODO Sol): 최대한 pos table 한개는 나오게끔 수정해야함
+        """
+        if not torch.sum(rel_score):
+            return torch.tensor([0.0], dtype=torch.float).requires_grad_(True).to("cuda")
+        # Rel == 0 => Negative의 score는 분자 계산에서 제외, score mask 진행
+        score_mask = torch.where(rel_score == 0, rel_score, score)
+        # e^0 == 1이라 0값이 아닌 인덱스만
+        positive_score = score_mask[torch.nonzero(score_mask, as_tuple=True)]
+        loss = -1 * torch.log( torch.sum(torch.exp(positive_score))
+                               / torch.sum(torch.exp(score)))
+
+        return loss
+
     def forward(self, q, column, caption, rel_score=None):
         qCLS = self.Qmodel(**q)[1] #b d
         context_encoding, column_encoding, _ = self.Tmodel.encode(contexts=caption, tables=column)
-        tp_concat_encoding = self.avg_pooler(context_encoding) + self.avg_pooler(column_encoding) #b 1 d
-        q_tp_softmax = self.classifier(torch.cat([qCLS, tp_concat_encoding.squeeze(1)], dim=-1)) #2
-
-        if rel_score:  # for train
-            return q_tp_softmax, torch.tensor(rel_score).to("cuda")
-        else:  # for test
-            q_tp_label = torch.argmax(q_tp_softmax, dim=-1)
-            return q_tp_label
-
-
-    def infer(self, q, table_column, table_caption, qid, tidList):
-        pass
-        """
-        # For predict
-        qCLS = self.Qmodel(**q)[1]
-        tableLen = len(tidList[0])
-
-        resultList = []
-        for i in range(tableLen):
-            context_encoding, column_encoding, _ = self.Tmodel.encode(contexts=(table_caption[0][i],), tables=(table_column[0][i],))
-            table_concat_encoding = self.avg_pooler(context_encoding) + self.avg_pooler(column_encoding)
-            q_t_cos = F.cosine_similarity(qCLS, table_concat_encoding.squeeze(1))
-            #print("{} , {} : {} ".format(qid[0], tidList[0][i], q_t_cos))
-            resultList.append([qid[0], tidList[0][i], str(abs(q_t_cos.item()))])
-        return resultList
-        """
-
-    def test_step(self, batch, batch_idx):
-        labeled = self(*batch)
-        q_tp_label = torch.argmax(labeled[0], dim=-1)
-        print(labeled, q_tp_label)
-        #with open(self.hparams.output_file, 'a') as f:
-        #    for r in resultList:
-        #        f.write("{}\n".format(",".join(r)))
-
+        tp_concat_encoding = self.avg_pooler(context_encoding) + self.avg_pooler(column_encoding)
+        q_tp_cos = F.cosine_similarity(qCLS, tp_concat_encoding.squeeze(1))
+        if rel_score == None:
+            return q_tp_cos
+        else:
+            return q_tp_cos, rel_score
 
     def training_step(self, batch, batch_idx):
-        tp_softmax, rel_score = self(*batch)
-        loss = self.criterion(tp_softmax, rel_score)
+        q, column, caption, rel_score, _, _ = batch
+        score, rel_score = self(q, column, caption, torch.tensor(rel_score, dtype=torch.float).to("cuda"))
+        loss = self.nllloss(score, rel_score)
         self.log('train_loss', loss, on_epoch=True)
         return {'loss': loss}
 
     def validation_step(self, batch, batch_idx):
-        tp_softmax, rel_score = self(*batch)
-        loss = self.criterion(tp_softmax, rel_score)
+        q, column, caption, rel_score, _, _ = batch
+        score, rel_score = self(q, column, caption, torch.tensor(rel_score, dtype=torch.float).to("cuda"))
+        loss = self.nllloss(score, rel_score)
         self.log('val_loss', loss)
-        return {'val_loss': loss}
+        return {'val_loss': loss.item()}
 
+    def test_step(self, batch, batch_idx):
+        q, column, caption, _, qid, tid = batch
+        score = self(q, column, caption)
+        with open(self.hparams.output_file, 'a') as f:
+           f.write("{},{},{}\n".format(qid[0], tid[0], abs(score.item())))
+
+    def infer(self, q, table_column, table_caption, qid, tidList):
+        pass
 
     def test_step_end(self, test_step_outputs):
         pass

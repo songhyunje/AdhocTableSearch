@@ -37,7 +37,7 @@ class QueryTableDataModule(pl.LightningDataModule):
     def setup(self, stage=None):
         if stage == 'fit' or stage is None:
             table_full = QueryTableDataset(data_dir=self.data_dir, data_type='train')
-            self.train, self.valid = random_split(table_full, [55, 5])
+            self.train, self.valid = random_split(table_full, [len(table_full)-int(len(table_full)*0.1), int(len(table_full)*0.1)])
 
         if stage == 'test' or stage is None:
             self.test = QueryTableDataset(data_dir=self.data_dir, data_type='test')
