@@ -2,6 +2,7 @@
 model/
 *.ckpt
 __pycache__/
+*.csv
 
 data/
 lightning_logs/
