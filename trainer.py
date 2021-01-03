@@ -17,7 +17,7 @@ def train(args):
         dirpath=args.output_dir,
         filename='{epoch:02d}-{val_loss:.2f}',
         prefix="checkpoint",
-        monitor="val_loss",#val_loss
+        monitor="val_loss",
         verbose=True,
         mode="min",
         save_top_k=3
@@ -38,7 +38,7 @@ def train(args):
 
     train_params = {}
     if args.gpus > 1:
-        train_params["distributed_backend"] = "ddp"
+        train_params["accelerator"] = "ddp"
 
     train_params["accumulate_grad_batches"] = args.accumulate_grad_batches
 
@@ -50,9 +50,6 @@ def train(args):
 
     if args.do_train:
         trainer.fit(model, data_module)
-
-    if args.do_predict:
-        trainer.test()
 
 
 def add_generic_arguments(parser):
@@ -67,7 +64,7 @@ def add_generic_arguments(parser):
     parser.add_argument("--precision", default=32, type=int, help="Precision")
     parser.add_argument("--do_train", action="store_true", help="Whether to run training.")
     parser.add_argument("--do_predict", action="store_true", help="Whether to run predictions on the test set.")
-    parser.add_argument("--accumulate_grad_batches", type=int, default=1,
+    parser.add_argument("--accumulate_grad_batches", type=int, default=5,
                         help="Number of updates steps to accumulate before performing a backward/update pass.",
                         )
     parser.add_argument("--sync_batchnorm", action="store_true",
