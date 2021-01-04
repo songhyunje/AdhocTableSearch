@@ -15,18 +15,26 @@ class QueryTableMatcher(pl.LightningModule):
         self.hparams = hparams
         self.Qmodel = BertModel.from_pretrained(self.hparams.bert_path)
         self.Tmodel = TableBertModel.from_pretrained(self.hparams.tabert_path)
-        self.avg_pooler = nn.AdaptiveAvgPool2d([1, 768])
+        self.norm = nn.LayerNorm(768)
+        # self.avg_pooler = nn.AdaptiveAvgPool2d([1, 768])
 
     def forward(self, q, pos_column, pos_caption, neg_column, neg_caption):
-        qCLS = self.Qmodel(**q)[1]  # b x d
+        qCLS = self.Qmodel(**q)[1]  # B x d
         context_encoding, column_encoding, _ = self.Tmodel.encode(contexts=pos_caption, tables=pos_column)
-        tp_concat_encoding = self.avg_pooler(context_encoding) + self.avg_pooler(column_encoding)
-        q_tp_cos = F.cosine_similarity(qCLS, tp_concat_encoding.squeeze(1))
+        # tp_concat_encoding = self.avg_pooler(context_encoding) + self.avg_pooler(column_encoding)
+        # q_tp_cos = F.cosine_similarity(qCLS, tp_concat_encoding.squeeze(1))
+        tp_concat_encoding = torch.mean(context_encoding, dim=1) + torch.mean(column_encoding, dim=1)
+        # q_tp_cos = F.cosine_similarity(qCLS, tp_concat_encoding)
+        q_tp_cos = self.norm(qCLS) * self.norm(tp_concat_encoding)
+
 
         context_encoding, column_encoding, _ = self.Tmodel.encode(contexts=neg_caption, tables=neg_column)
-        tn_concat_encoding = self.avg_pooler(context_encoding) + self.avg_pooler(column_encoding)
-        q_tn_cos = F.cosine_similarity(qCLS, tn_concat_encoding.squeeze(1))
-        return q_tp_cos, q_tn_cos
+        # tn_concat_encoding = self.avg_pooler(context_encoding) + self.avg_pooler(column_encoding)
+        # q_tn_cos = F.cosine_similarity(qCLS, tn_concat_encoding.squeeze(1))
+        tn_concat_encoding = torch.mean(context_encoding, dim=1) + torch.mean(column_encoding, dim=1)
+        # q_tn_cos = F.cosine_similarity(qCLS, tn_concat_encoding)
+        q_tn_cos = self.norm(qCLS) * self.norm(tn_concat_encoding)
+        return q_tp_cos.sum(-1), q_tn_cos.sum(-1)
 
     def training_step(self, batch, batch_idx):
         tp_cos, tn_cos = self(*batch)
@@ -52,9 +60,11 @@ class QueryTableMatcher(pl.LightningModule):
     def infer(self, q, column, caption):
         qCLS = self.Qmodel(**q)[1]  # b x d
         context_encoding, column_encoding, _ = self.Tmodel.encode(contexts=caption, tables=column)
-        concat_encoding = self.avg_pooler(context_encoding) + self.avg_pooler(column_encoding)
-        t_cos = F.cosine_similarity(qCLS, concat_encoding.squeeze(1))
-        return t_cos
+        # concat_encoding = self.avg_pooler(context_encoding) + self.avg_pooler(column_encoding)
+        concat_encoding = torch.mean(context_encoding, dim=1) + torch.mean(column_encoding, dim=1)
+        # sim = F.cosine_similarity(qCLS, concat_encoding.squeeze(1))
+        sim = self.norm(qCLS) * self.norm(concat_encoding)
+        return sim.sum(-1)
 
     def test_step_end(self, test_step_outputs):
         pass
