@@ -16,7 +16,8 @@ class QueryTableMatcher(pl.LightningModule):
         self.Qmodel = BertModel.from_pretrained(self.hparams.bert_path)
         self.Tmodel = TableBertModel.from_pretrained(self.hparams.tabert_path)
         self.norm = nn.LayerNorm(768)
-        # self.avg_pooler = nn.AdaptiveAvgPool2d([1, 768])
+        self.criterion = nn.MarginRankingLoss(margin=1)
+        self.avg_pooler = nn.AdaptiveAvgPool2d([1, 768])
 
     def forward(self, q, pos_column, pos_caption, neg_column, neg_caption):
         qCLS = self.Qmodel(**q)[1]  # B x d
@@ -38,17 +39,18 @@ class QueryTableMatcher(pl.LightningModule):
 
     def training_step(self, batch, batch_idx):
         tp_cos, tn_cos = self(*batch)
-        logit_matrix = torch.cat([tp_cos.unsqueeze(1), tn_cos.unsqueeze(1)], dim=1)  # [B, 2]
-        lsm = F.log_softmax(logit_matrix, dim=1)
-        loss = -1.0 * lsm[:, 0]
+        nbatch = tp_cos.size(0)
+        target = torch.ones(nbatch, device=self.device)
+        loss = self.criterion(tp_cos, tn_cos, target)
+
         self.log('train_loss', loss.mean(), on_epoch=True)
         return loss.mean()
 
     def validation_step(self, batch, batch_idx):
         tp_cos, tn_cos = self(*batch)
-        logit_matrix = torch.cat([tp_cos.unsqueeze(1), tn_cos.unsqueeze(1)], dim=1)  # [B, 2]
-        lsm = F.log_softmax(logit_matrix, dim=1)
-        loss = -1.0 * lsm[:, 0]
+        nbatch = tp_cos.size(0)
+        target = torch.ones(nbatch, device=self.device)
+        loss = self.criterion(tp_cos, tn_cos, target)
         self.log('val_loss', loss.mean())
 
     def test_step(self, batch, batch_idx):
@@ -59,12 +61,12 @@ class QueryTableMatcher(pl.LightningModule):
 
     def infer(self, q, column, caption):
         qCLS = self.Qmodel(**q)[1]  # b x d
-        context_encoding, column_encoding, _ = self.Tmodel.encode(contexts=caption, tables=column)
-        # concat_encoding = self.avg_pooler(context_encoding) + self.avg_pooler(column_encoding)
-        concat_encoding = torch.mean(context_encoding, dim=1) + torch.mean(column_encoding, dim=1)
-        # sim = F.cosine_similarity(qCLS, concat_encoding.squeeze(1))
-        sim = self.norm(qCLS) * self.norm(concat_encoding)
-        return sim.sum(-1)
+        #context_encoding, column_encoding, _ = self.Tmodel.encode(contexts=caption, tables=column)
+        concat_encoding = self.avg_pooler(context_encoding) + self.avg_pooler(column_encoding)
+        #concat_encoding = torch.mean(context_encoding, dim=1) + torch.mean(column_encoding, dim=1)
+        sim = F.cosine_similarity(qCLS, concat_encoding.squeeze(1))
+        #sim = self.norm(qCLS) * self.norm(concat_encoding)
+        return sim.item()
 
     def test_step_end(self, test_step_outputs):
         pass
