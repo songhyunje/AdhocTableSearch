@@ -4,8 +4,7 @@ import pytorch_lightning as pl
 from data_module import QueryTableDataModule
 from model import QueryTableMatcher
 import subprocess
-import os
-import time
+
 
 class TREC_evaluator(object):
     def __init__(self, qrels_file, result_file, trec_cmd = "./trec_eval"):
@@ -80,9 +79,10 @@ def result_to_trecformat(qrelsFile, predictFile, resultFile):
         for _, v in qrels_dict.items():
             f.write("\t".join(v))
 
+
 def predict(args):
-    pl.seed_everything(args.seed)
     data_module = QueryTableDataModule(args)
+    data_module.setup('test')
 
     model = QueryTableMatcher(args)
     model = model.load_from_checkpoint(
@@ -91,7 +91,7 @@ def predict(args):
     # TODO: args도 checkpoint 대로 따라가서 output_file 이 덮어짐
     model.hparams.output_file = args.output_file
     trainer = pl.Trainer.from_argparse_args(args)
-    trainer.test(model, test_dataloaders = data_module.test_dataloader())
+    trainer.test(model, datamodule=data_module)
 
 
 def add_generic_arguments(parser):
@@ -105,12 +105,7 @@ def add_generic_arguments(parser):
                         help="The ckpt file ")
     parser.add_argument("--gpus", type=int)
     parser.add_argument("--precision", default=32, type=int, help="Precision")
-    parser.add_argument("--accumulate_grad_batches", type=int, default=1,
-                        help="Number of updates steps to accumulate before performing a backward/update pass.",
-                        )
-    parser.add_argument("--seed", type=int, default=43, help="random seed for initialization")
     parser.add_argument("--resume_from_checkpoint", type=str, default=None)
-
 
 
 if __name__ == "__main__":

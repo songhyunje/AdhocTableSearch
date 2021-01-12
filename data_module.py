@@ -4,7 +4,8 @@ import pytorch_lightning as pl
 from torch.utils.data import DataLoader, random_split
 from transformers import BertTokenizer
 
-from dataset import QueryTableDataset, query_table_collate_fn
+from dataset import QueryTableDataset, query_table_collate_fn, QueryTablePredictionDataset, \
+    query_table_prediction_collate_fn
 from table_bert import TableBertModel
 
 
@@ -29,37 +30,40 @@ class QueryTableDataModule(pl.LightningDataModule):
                           query_tokenizer=self.query_tokenizer,
                           table_tokenizer=self.table_tokenizer,
                           prepare=True)
-        QueryTableDataset(data_dir=self.data_dir, data_type='test',
-                          query_tokenizer=self.query_tokenizer,
-                          table_tokenizer=self.table_tokenizer,
-                          prepare=True)
+        QueryTablePredictionDataset(data_dir=self.data_dir, data_type='test',
+                                    query_tokenizer=self.query_tokenizer,
+                                    table_tokenizer=self.table_tokenizer,
+                                    prepare=True)
 
     def setup(self, stage=None):
         if stage == 'fit' or stage is None:
             table_full = QueryTableDataset(data_dir=self.data_dir, data_type='train')
-            self.train, self.valid = random_split(table_full, [len(table_full)-int(len(table_full)*0.1), int(len(table_full)*0.1)])
+            self.train, self.valid = random_split(table_full, [len(table_full) - int(len(table_full) * 0.1),
+                                                               int(len(table_full) * 0.1)])
 
-        if stage == 'test' or stage is None:
-            self.test = QueryTableDataset(data_dir=self.data_dir, data_type='test')
+        if stage == 'test':
+            self.test = QueryTablePredictionDataset(data_dir=self.data_dir, data_type='test')
 
     def train_dataloader(self):
         return DataLoader(self.train,
                           batch_size=self.train_batch_size,
                           shuffle=True,
                           collate_fn=query_table_collate_fn,
-                          num_workers=8)
+                          num_workers=4,
+                          pin_memory=True)
 
     def val_dataloader(self):
         return DataLoader(self.valid,
                           batch_size=self.valid_batch_size,
                           collate_fn=query_table_collate_fn,
-                          num_workers=8)
+                          num_workers=4,
+                          )
 
     def test_dataloader(self):
-        return DataLoader(QueryTableDataset(data_dir=self.data_dir, data_type='test'),
+        return DataLoader(self.test,
                           batch_size=self.test_batch_size,
-                          collate_fn=query_table_collate_fn,
-                          num_workers=8
+                          collate_fn=query_table_prediction_collate_fn,
+                          num_workers=4
                           )
 
 
