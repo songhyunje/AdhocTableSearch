@@ -22,12 +22,13 @@ class Sample(object):
 class QueryTableDataset(Dataset):
     def __init__(self, data_dir: str = '.data', data_type: str = 'train',
                  query_tokenizer=None, table_tokenizer=None, max_query_length=15,
-                 prepare=False):
+                 prepare=False, is_slice=True):
         self.data_dir = data_dir
         self.query_file = data_type + '.query'
         self.table_file = data_type + '.table'
         self.ids_file = data_type + '.pair'
         self.data_type = data_type  # test, train 구분하기위해
+        self.is_slice = is_slice
         if prepare:
             self.prepare(data_dir, data_type, query_tokenizer, table_tokenizer, max_query_length)
 
@@ -38,6 +39,63 @@ class QueryTableDataset(Dataset):
 
     def __getitem__(self, index):
         return self.data[index]
+
+    def slice_table(self, title, heading, datas, table_tokenizer):
+        table_rep_list = []
+        row_n = 5 # 평균행이 약 13개
+
+        # n-Row slice
+        if len(datas) > row_n:
+            slice_row_data = [datas[i * row_n:(i + 1) * row_n] for i in range((len(datas) + row_n - 1) // row_n)]
+            for row in slice_row_data:
+                column_rep = Table(id=title,
+                                   header=[Column(h.strip(), 'text') for h in heading],
+                                   data=row
+                                   ).tokenize(table_tokenizer)
+                table_rep_list.append(column_rep)
+
+        else:
+            column_rep = Table(id=title,
+                               header=[Column(h.strip(), 'text') for h in heading],
+                               data=datas
+                               ).tokenize(table_tokenizer)
+            table_rep_list.append(column_rep)
+
+        #1-Col Slice
+        for idx, col in enumerate(heading):
+            trans_heading = [col] * len(datas) # 행 개수 만큼 Heading을 [col, col, ... 이렇게 펴줌 ]
+            trans_row = [ [row[idx] for row in datas] ] # 각 열의 해당하는 row data를 가로로
+            column_rep = Table(id=title,
+                               header=[Column(h.strip(), 'text') for h in trans_heading],
+                               data=trans_row
+                               ).tokenize(table_tokenizer)
+            table_rep_list.append(column_rep)
+
+        # TODO: 만약 Col-1개 짜른것의 성능이 너무 안 좋으면 데이터를 보고 Multi-col 답변이 많은지를 분석후 코드 추가
+        # multi-Col Slice
+        # row_c = 2  # 평균열이 약 5개
+        # if len(heading) > 2:
+        #     slice_col_data = [heading[i * row_c:(i + 1) * row_c] for i in range((len(heading) + row_c - 1) // row_c)]
+        #     col_idx = 0
+        #     for col in slice_col_data:
+        #         row_data = [row[col_idx:len(col)] for row in datas]
+        #         col_idx += len(col)
+        #         try:
+        #             column_rep = Table(id=title,
+        #                                header=[Column(h.strip(), 'text') for h in col],
+        #                                data=row_data
+        #                                ).tokenize(table_tokenizer)
+        #         except:
+        #             # Col의 모든 Row가 빈값이면 에러남
+        #             continue
+        #         table_rep_list.append(column_rep)
+        # else:
+        #     column_rep = Table(id=title,
+        #                        header=[Column(h.strip(), 'text') for h in heading],
+        #                        data=datas
+        #                        ).tokenize(table_tokenizer)
+        #     table_rep_list.append(column_rep)
+        return table_rep_list
 
     def prepare(self, data_dir, data_type, query_tokenizer, table_tokenizer, max_query_length):
         if self._check_exists():
@@ -88,19 +146,24 @@ class QueryTableDataset(Dataset):
 
                 if col == 0 or row == 0:
                     continue
-
-                column_rep = Table(id=title,
-                                   header=[Column(h.strip(), 'text') for h in heading],
-                                   data=body
-                                   ).tokenize(table_tokenizer)
+                if self.is_slice:
+                    column_reps = self.slice_table(title, heading, body, table_tokenizer)
+                    #print(f"row : {row}, col : {col}, slcie : {len(slice_tables)}")
+                else:
+                    column_reps = [Table(id=title,
+                                       header=[Column(h.strip(), 'text') for h in heading],
+                                       data=body
+                                       ).tokenize(table_tokenizer)]
                 # TODO: caption을 다양하게 주는부분, 비교실험 해볼부분임
                 caption = " ".join(heading) + " " + title + " " + secTitle + " " + caption
                 caption_rep = table_tokenizer.tokenize(caption)
 
                 if rel == '0':
-                    neg_tables[qid].append((column_rep, caption_rep))
+                    for column_rep in column_reps:
+                        neg_tables[qid].append((column_rep, caption_rep))
                 else:
-                    pos_tables[qid].append((column_rep, caption_rep))
+                    for column_rep in column_reps:
+                        pos_tables[qid].append((column_rep, caption_rep))
 
         for qid in query_dict:
             if not pos_tables[qid]:
@@ -139,11 +202,12 @@ def query_table_collate_fn(batch):
 class QueryTablePredictionDataset(Dataset):
     def __init__(self, data_dir: str = '.data', data_type: str = 'test',
                  query_tokenizer=None, table_tokenizer=None, max_query_length=15,
-                 prepare=False):
+                 prepare=False, is_slice=True):
         self.data_dir = data_dir
         self.query_file = data_type + '.query'
         self.table_file = data_type + '.table'
         self.ids_file = data_type + '.pair'
+        self.is_slice = is_slice
 
         if prepare:
             self.prepare(data_dir, data_type, query_tokenizer, table_tokenizer, max_query_length)
@@ -155,6 +219,65 @@ class QueryTablePredictionDataset(Dataset):
 
     def __getitem__(self, index):
         return self.pair_ids[index]
+
+    def slice_table(self, title, heading, datas, table_tokenizer):
+        table_rep_list = []
+        row_n = 5  # 평균행이 약 13개
+
+        # n-Row slice
+        if len(datas) > row_n:
+            slice_row_data = [datas[i * row_n:(i + 1) * row_n] for i in range((len(datas) + row_n - 1) // row_n)]
+            for row in slice_row_data:
+                column_rep = Table(id=title,
+                                   header=[Column(h.strip(), 'text') for h in heading],
+                                   data=row
+                                   ).tokenize(table_tokenizer)
+                table_rep_list.append(column_rep)
+
+        else:
+            column_rep = Table(id=title,
+                               header=[Column(h.strip(), 'text') for h in heading],
+                               data=datas
+                               ).tokenize(table_tokenizer)
+            table_rep_list.append(column_rep)
+
+        # 1-Col Slice
+        for idx, col in enumerate(heading):
+            trans_heading = [col] * len(datas)  # 행 개수 만큼 Heading을 [col, col, ... 이렇게 펴줌 ]
+            trans_row = [[row[idx] for row in datas]]  # 각 열의 해당하는 row data를 가로로
+            column_rep = Table(id=title,
+                               header=[Column(h.strip(), 'text') for h in trans_heading],
+                               data=trans_row
+                               ).tokenize(table_tokenizer)
+            table_rep_list.append(column_rep)
+
+        # TODO: 만약 Col-1개 짜른것의 성능이 너무 안 좋으면 데이터를 보고 Multi-col 답변이 많은지를 분석후 코드 추가
+        # multi-Col Slice
+        # row_c = 2  # 평균열이 약 5개
+        # if len(heading) > 2:
+        #     slice_col_data = [heading[i * row_c:(i + 1) * row_c] for i in range((len(heading) + row_c - 1) // row_c)]
+        #     col_idx = 0
+        #     for col in slice_col_data:
+        #         row_data = [row[col_idx:len(col)] for row in datas]
+        #         col_idx += len(col)
+        #         try:
+        #             column_rep = Table(id=title,
+        #                                header=[Column(h.strip(), 'text') for h in col],
+        #                                data=row_data
+        #                                ).tokenize(table_tokenizer)
+        #         except:
+        #             # Col의 모든 Row가 빈값이면 에러남
+        #             continue
+        #         table_rep_list.append(column_rep)
+        # else:
+        #     column_rep = Table(id=title,
+        #                        header=[Column(h.strip(), 'text') for h in heading],
+        #                        data=datas
+        #                        ).tokenize(table_tokenizer)
+        #     table_rep_list.append(column_rep)
+        return table_rep_list
+
+
 
     def prepare(self, data_dir, data_type, query_tokenizer, table_tokenizer, max_query_length):
         if self._check_exists():
@@ -205,14 +328,19 @@ class QueryTablePredictionDataset(Dataset):
                 if col == 0 or row == 0:
                     continue
 
-                column_rep = Table(id=title,
-                                   header=[Column(h.strip(), 'text') for h in heading],
-                                   data=body
-                                   ).tokenize(table_tokenizer)
+                if self.is_slice:
+                    column_reps = self.slice_table(title, heading, body, table_tokenizer)
+                    #print(f"row : {row}, col : {col}, slcie : {len(slice_tables)}")
+                else:
+                    column_reps = [Table(id=title,
+                                       header=[Column(h.strip(), 'text') for h in heading],
+                                       data=body
+                                       ).tokenize(table_tokenizer)]
 
                 caption = " ".join(heading) + " " + title + " " + secTitle + " " + caption
                 caption_rep = table_tokenizer.tokenize(caption)
-                pairs.append([qid, query_dict[qid], tableId, column_rep, caption_rep, rel])
+                for column_rep in column_reps:
+                    pairs.append([qid, query_dict[qid], tableId, column_rep, caption_rep, rel])
 
         # Save
         with open(os.path.join(processed_dir, self.ids_file), 'wb') as f:
