@@ -11,132 +11,171 @@
 
 import os
 import time
-import argparse
-import json
-from pathlib import Path
-from tqdm import tqdm
+import logging
+import pickle
+from typing import List, Tuple, Iterator
 
 import faiss
-import torch
+import numpy as np
 
-from model import QueryTableMatcher
-from transformers import BertTokenizer
-from table_bert import Table, Column
+logger = logging.getLogger()
 
 
-def faiss_search(args):
-    # Model, BERT loader
-    query_tokenizer = BertTokenizer.from_pretrained(args.bert_path)
-    model = QueryTableMatcher(args)
-    model = model.load_from_checkpoint(
-        checkpoint_path=args.ckpt_file,
-    )
+class DenseIndexer(object):
 
-    # Data loader
-    data_path = args.data_dir
-    _table_encode(data_path=data_path, table_encoder=model)
-    tables = torch.load(os.path.join(data_path, 'processed/table.idx'))
-    db_idxs = torch.load(os.path.join(data_path, 'processed/db.idx'))
+    def __init__(self, buffer_size: int = 50000):
+        self.buffer_size = buffer_size
+        self.index_id_to_db_id = []
+        self.index = None
 
-    # Indexing
-    torch_tables = []
-    for table in tables:
-        torch_tables.append(table[0].squeeze())
-    tables = torch.stack(torch_tables)
-    tables = tables.detach().numpy()
-    index = faiss.IndexFlatL2(768) # base L2 distance
-    index.add(tables)
+    def index_data(self, vectors: List[Tuple[object, np.array]]):
+        start_time = time.time()
+        # buffer = []
+        # for i, item in enumerate(iterate_encoded_files(vector_files)):
+        #     db_id, doc_vector = item
+        #     buffer.append((db_id, doc_vector))
+        #     if 0 < self.buffer_size == len(buffer):
+        #         # indexing in batches is beneficial for many faiss index types
+        #         self._index_batch(buffer)
+        #         logger.info('data indexed %d, used_time: %f sec.',
+        #                     len(self.index_id_to_db_id), time.time() - start_time)
+        #         buffer = []
 
-    # Query encoding
-    # Sanity Check
-    query_tokenized = query_tokenizer.encode_plus('pga leaderboard',
-                                                  max_length=15,
-                                                  padding='max_length',
-                                                  truncation=True,
-                                                  return_tensors="pt"
-                                                  )
-    qCLS = model.Qmodel(**query_tokenized)[1].detach().numpy()
+        for i in range(0, len(vectors), self.buffer_size):
+            self._index_batch(vectors[i:i+self.buffer_size])
+            logger.info('data indexed %d, used_time: %f sec.',
+                        len(self.index_id_to_db_id), time.time() - start_time)
 
-    # knn Search
-    st = time.time()
-    scores, indexes = index.search(qCLS, args.topk)
-    print(f">>> Search time ... {time.time() - st} sec ")
-    db_ids = [[db_idxs[i] for i in query_top_idxs] for query_top_idxs in indexes]
-    result = [(db_ids[i], scores[i]) for i in range(len(db_ids))]
-    print(result[:5])
-    return result
+        indexed_cnt = len(self.index_id_to_db_id)
+        logger.info('Total data indexed %d', indexed_cnt)
+        logger.info('Data indexing completed.')
 
+    def _index_batch(self, data: List[Tuple[object, np.array]]):
+        raise NotImplementedError
 
-def _table_encode(data_path = './data/', table_encoder = None):
-    if os.path.exists(os.path.join(data_path, 'processed/table.idx')) \
-            and os.path.exists(os.path.join(data_path, 'processed/db.idx')):
-        return
-    else:
-        path = Path(data_path + 'train.jsonl')
-        data = []
-        tableid_list = []
-        with open(path) as f:
-            for line in tqdm(f.readlines()[:100]):
-                if not line.strip():
-                    break
-                # 테이블 기본 Meta data 파싱
-                jsonStr = json.loads(line)
-                tableId = jsonStr['docid']
-                query = jsonStr['query']
-                qid = jsonStr['qid']
-                rel = jsonStr['rel']
+    def search_knn(self, query_vectors: np.array, top_docs: int) -> List[Tuple[List[object], List[float]]]:
+        raise NotImplementedError
 
-                # Raw Json 파싱
-                raw_json = json.loads(jsonStr['table']['raw_json'])
-                title = raw_json['pgTitle']
-                secTitle = raw_json['secondTitle']
-                hRow = raw_json['numHeaderRows']
-                row = raw_json['numDataRows']
-                col = raw_json['numCols']
-                caption = raw_json['caption']
-                heading = raw_json['title']
-                body = raw_json['data']
+    def serialize(self, file: str):
+        logger.info('Serializing index to %s', file)
 
-                if col == 0 or row == 0:
-                    continue
+        if os.path.isdir(file):
+            index_file = os.path.join(file, "index.dpr")
+            meta_file = os.path.join(file, "index_meta.dpr")
+        else:
+            index_file = file + '.index.dpr'
+            meta_file = file + '.index_meta.dpr'
 
-                tableid_list.append(tableId)
-                column_rep = Table(id=title,
-                                   header=[Column(h.strip(), 'text') for h in heading],
-                                   data=body
-                                   ).tokenize(table_encoder.Tmodel.tokenizer)
-                caption = " ".join(heading) + " " + title + " " + secTitle + " " + caption
-                caption_rep = table_encoder.Tmodel.tokenizer.tokenize(caption)
+        faiss.write_index(self.index, index_file)
+        with open(meta_file, mode='wb') as f:
+            pickle.dump(self.index_id_to_db_id, f)
 
-                context_encoding, column_encoding, _ = table_encoder.Tmodel.encode(contexts=[caption_rep], tables=[column_rep])
-                tp_concat_encoding = torch.mean(context_encoding, dim=1) + torch.mean(column_encoding, dim=1)
-                data.append(tp_concat_encoding)
-        tableid_dict = dict((idx, tid) for idx, tid in enumerate(tableid_list))
-        # Save
-        with open(os.path.join(data_path, 'processed/table.idx'), 'wb') as f:
-            torch.save(data, f)
+    def deserialize_from(self, file: str):
+        logger.info('Loading index from %s', file)
 
-        with open(os.path.join(data_path, 'processed/db.idx'), 'wb') as f:
-            torch.save(tableid_dict, f)
-        print('Done!')
+        if os.path.isdir(file):
+            index_file = os.path.join(file, "index.dpr")
+            meta_file = os.path.join(file, "index_meta.dpr")
+        else:
+            index_file = file + '.index.dpr'
+            meta_file = file + '.index_meta.dpr'
+
+        self.index = faiss.read_index(index_file)
+        logger.info('Loaded index of type %s and size %d', type(self.index), self.index.ntotal)
+
+        with open(meta_file, "rb") as reader:
+            self.index_id_to_db_id = pickle.load(reader)
+        assert len(
+            self.index_id_to_db_id) == self.index.ntotal, 'Deserialized index_id_to_db_id should match faiss index size'
+
+    def _update_id_mapping(self, db_ids: List):
+        self.index_id_to_db_id.extend(db_ids)
 
 
+class DenseFlatIndexer(DenseIndexer):
 
-def add_generic_arguments(parser):
-    parser.add_argument("--data_dir", default=None, type=str, required=True,
-                        help="The input data dir.")
-    parser.add_argument("--ckpt_file", default=None, type=str, required=True,
-                        help="The ckpt file ")
-    parser.add_argument("--gpus", type=int)
-    parser.add_argument("--topk", type=int)
+    def __init__(self, vector_sz: int, buffer_size: int = 50000):
+        super(DenseFlatIndexer, self).__init__(buffer_size=buffer_size)
+        self.index = faiss.IndexFlatIP(vector_sz)
+
+    def _index_batch(self, data: List[Tuple[object, np.array]]):
+        db_ids = [t[0] for t in data]
+        vectors = [np.reshape(t[1], (1, -1)) for t in data]
+        vectors = np.concatenate(vectors, axis=0)
+        self._update_id_mapping(db_ids)
+        self.index.add(vectors)
+
+    def search_knn(self, query_vectors: np.array, top_docs: int) -> List[Tuple[List[object], List[float]]]:
+        scores, indexes = self.index.search(query_vectors, top_docs)
+        # convert to external ids
+        db_ids = [[self.index_id_to_db_id[i] for i in query_top_idxs] for query_top_idxs in indexes]
+        result = [(db_ids[i], scores[i]) for i in range(len(db_ids))]
+        return result
 
 
+class DenseHNSWFlatIndexer(DenseIndexer):
+    """
+     Efficient index for retrieval. Note: default settings are for hugh accuracy but also high RAM usage
+    """
 
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    add_generic_arguments(parser)
-    QueryTableMatcher.add_model_specific_args(parser)
-    args = parser.parse_args()
-    # predict
-    faiss_search(args)
+    def __init__(self, vector_sz: int, buffer_size: int = 50000, store_n: int = 512
+                 , ef_search: int = 128, ef_construction: int = 200):
+        super(DenseHNSWFlatIndexer, self).__init__(buffer_size=buffer_size)
+
+        # IndexHNSWFlat supports L2 similarity only
+        # so we have to apply DOT -> L2 similairy space conversion with the help of an extra dimension
+        index = faiss.IndexHNSWFlat(vector_sz + 1, store_n)
+        index.hnsw.efSearch = ef_search
+        index.hnsw.efConstruction = ef_construction
+        self.index = index
+        self.phi = None
+
+    def index_data(self, vectors: List[Tuple[object, np.array]]):
+        self._set_phi(vectors)
+
+        super(DenseHNSWFlatIndexer, self).index_data(vectors)
+
+    def _set_phi(self, vectors: List[Tuple[object, np.array]]):
+        phi = 0
+        for tid, table_vector in vectors:
+            norms = (table_vector ** 2).sum()
+            phi = max(phi, norms)
+ 
+        logger.info('HNSWF DotProduct -> L2 space phi={}'.format(phi))
+        self.phi = phi
+
+    def _index_batch(self, data: List[Tuple[object, np.array]]):
+        # max norm is required before putting all vectors in the index to convert inner product similarity to L2
+        if self.phi is None:
+            raise RuntimeError('Max norm needs to be calculated from all data at once,'
+                               'results will be unpredictable otherwise.'
+                               'Run `_set_phi()` before calling this method.')
+
+        db_ids = [t[0] for t in data]
+        vectors = [np.reshape(t[1], (1, -1)) for t in data]
+
+        norms = [(doc_vector ** 2).sum() for doc_vector in vectors]
+        aux_dims = [np.sqrt(self.phi - norm) for norm in norms]
+        hnsw_vectors = [np.hstack((doc_vector, aux_dims[i].reshape(-1, 1))) for i, doc_vector in
+                        enumerate(vectors)]
+        hnsw_vectors = np.concatenate(hnsw_vectors, axis=0)
+
+        self._update_id_mapping(db_ids)
+        self.index.add(hnsw_vectors)
+
+    def search_knn(self, query_vectors: np.array, top_docs: int) -> List[Tuple[List[object], List[float]]]:
+
+        aux_dim = np.zeros(len(query_vectors), dtype='float32')
+        query_nhsw_vectors = np.hstack((query_vectors, aux_dim.reshape(-1, 1)))
+        logger.info('query_hnsw_vectors %s', query_nhsw_vectors.shape)
+        scores, indexes = self.index.search(query_nhsw_vectors, top_docs)
+        # convert to external ids
+        db_ids = [[self.index_id_to_db_id[i] for i in query_top_idxs] for query_top_idxs in indexes]
+        result = [(db_ids[i], scores[i]) for i in range(len(db_ids))]
+        return result
+
+    def deserialize_from(self, file: str):
+        super(DenseHNSWFlatIndexer, self).deserialize_from(file)
+        # to trigger warning on subsequent indexing
+        self.phi = None
 

@@ -3,6 +3,8 @@ model/
 *.ckpt
 __pycache__/
 *.csv
+*.swp
+*.dpr
 
 data/
 lightning_logs/
