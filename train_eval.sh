@@ -1,5 +1,10 @@
 #!/bin/bash
 
+pushd ./data/1/processed &> /dev/null
+rm -rf test.table
+rm -rf train.pair
+popd &> /dev/null
+
 pushd output &> /dev/null
 rm -rf checkpoint-epoch*
 popd &> /dev/null
@@ -14,7 +19,7 @@ python trainer.py --data_dir ./data/1 \
                   --valid_batch_size 1 \
                   --seed 1235 \
                   --output_dir output \
-                  --accumulate_grad_batches 5
+                  --accumulate_grad_batches 16 
 
 CKPT=`ls output | sort -k3 -t'=' | head -1`
 
@@ -22,9 +27,9 @@ echo ${CKPT}
 python dense_retrieval.py --data_dir ./data/1/ \
                           --gpus 1 \
                           --ckpt_file ./output/${CKPT} \
-                          --hnsw_index \
+                          --hnsw_index
 
 python dense_retrieval.py --data_dir ./data/1/ \
                           --gpus 1 \
-                          --ckpt_file ./output/${CKPT} \
+                          --ckpt_file ./output/${CKPT}
 
