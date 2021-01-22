@@ -93,7 +93,7 @@ class QueryTableDataset(Dataset):
                                        data=body
                                        ).tokenize(table_tokenizer)]
                 rel = 1 if int(rel) > 0 else 0
-                data.append((query_dict[qid], column_reps, caption_rep, rel))
+                data.append((query_dict[qid], column_reps, [caption_rep] * len(column_reps), rel))
                 
         # Save
         with open(os.path.join(processed_dir, self.ids_file), 'wb') as f:
@@ -120,16 +120,17 @@ def query_table_collate_fn(batch):
              "token_type_ids": torch.stack(token_type_ids),
              "attention_mask": torch.stack(attention_mask)}
 
-    captions = [caption] * len(columns)
-    # attention mask
-    return query, columns, captions, torch.Tensor(rel)
+    return query, columns, caption, torch.Tensor(rel)
+
+    # captions = [caption] * len(columns)
+    # return query, columns, captions, torch.Tensor(rel)
 
 
 def slice_table(title, heading, datas, table_tokenizer):
     table_rep_list = []
 
-    min_row = 10         # 최소 10개의 행은 있어야 함
-    max_table_nums = 5  # 테이블은 최대 10개로 나뉘어짐
+    min_row = 10        # 최소 10개의 행은 있어야 함
+    max_table_nums = 3  # 테이블은 최대 10개로 나뉘어짐
     """
     시나리오, 최소행 = 5, 최대테이블 = 10 이라고 할 때 
     30행 테이블은 => 5행테이블 x 6개로 쪼개져야하고 

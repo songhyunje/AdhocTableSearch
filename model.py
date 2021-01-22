@@ -20,11 +20,12 @@ class QueryTableMatcher(pl.LightningModule):
         self.norm = nn.LayerNorm(768)
         # attention
         self.attention = nn.Sequential(
-            nn.Linear(768, 768),
+            nn.Linear(768, 128),
             nn.Tanh(),
-            nn.Linear(768, 1)
+            nn.Linear(128, 1)
         )
         self.linear = nn.Linear(768, 1)
+        #  self.linear = nn.Linear(768, 1)
 
     def forward(self, query, columns, captions):
         query = self.norm(self.Tmodel.bert(**query)[1])  # B x d
@@ -35,14 +36,13 @@ class QueryTableMatcher(pl.LightningModule):
         reps = []  # B x 768
         for q, column, caption in zip(query, columns, captions):
             context_encoding, column_encoding, _ = self.Tmodel.encode(contexts=caption, tables=column)
-            concat_encoding = self.norm(torch.mean(context_encoding, dim=1) + torch.mean(column_encoding, dim=1))
+            concat_encoding = self.norm(context_encoding[:, 0, :] + torch.mean(column_encoding, dim=1))
 
-            # embedding_max
-            # max_dim, out = torch.max(q * self.norm(concat_encoding), 0)   # T(# of table) x 768
-            # reps.append(max_dim)
+            H = q * concat_encoding  # subN x 768
 
-            # constraints
-            H = q * self.norm(concat_encoding)  # subN x 768
+            # embedding max
+            # M, _ = torch.max(H, 0)   # T(# of table) x 768
+            # reps.append(M)
 
             # Attention
             A = self.attention(H)  # subN x 1
@@ -68,7 +68,9 @@ class QueryTableMatcher(pl.LightningModule):
     def validation_step(self, batch, batch_idx):
         query, columns, captions, rel = batch
         outputs = self(query, columns, captions)
-        # use bce loss
+        # print(outputs)
+        # print(rel)
+        # bce with logits = bce loss + sigmoid
         loss = F.binary_cross_entropy_with_logits(outputs, rel.unsqueeze(1))
         # logit_matrix = torch.cat([tp_cos.unsqueeze(1), tn_cos.unsqueeze(1)], dim=1)  # [B, 2]
         # lsm = F.log_softmax(logit_matrix, dim=1)
@@ -87,8 +89,8 @@ class QueryTableMatcher(pl.LightningModule):
 
     def table_forward(self, column, caption):
         context_encoding, column_encoding, _ = self.Tmodel.encode(contexts=caption, tables=column)
-        concat_encoding = self.norm(torch.mean(context_encoding, dim=1) + torch.mean(column_encoding, dim=1))
-        return self.norm(concat_encoding)
+        concat_encoding = self.norm(context_encoding[:, 0, :] + torch.mean(column_encoding, dim=1))
+        return concat_encoding
 
     def test_step_end(self, test_step_outputs):
         pass
