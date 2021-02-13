@@ -14,7 +14,7 @@ class QueryTableMatcher(pl.LightningModule):
     def __init__(self, hparams):
         super().__init__()
         self.hparams = hparams
-        self.Tmodel = TableBertModel.from_pretrained(self.hparams.tabert_path)
+        self.Tmodel = TableBertModel.from_pretrained(self.hparams.tabert_path, self.hparams.config_file)
         # self.Qmodel = self.Tmodel.bert
         # self.Qmodel = BertModel.from_pretrained(self.hparams.bert_path)
         self.norm = nn.LayerNorm(768)
@@ -25,7 +25,10 @@ class QueryTableMatcher(pl.LightningModule):
             nn.Linear(128, 1)
         )
         self.linear = nn.Linear(768, 1)
-        #  self.linear = nn.Linear(768, 1)
+        # self.linear = nn.Sequential(
+        #     nn.Linear(768, 1),
+        #     nn.Sigmoid()
+        # )
 
     def forward(self, query, columns, captions):
         query = self.norm(self.Tmodel.bert(**query)[1])  # B x d
@@ -58,6 +61,8 @@ class QueryTableMatcher(pl.LightningModule):
         query, columns, captions, rel = batch
         outputs = self(query, columns, captions)
         # bce with logits = bce loss + sigmoid
+        # Y_prob = torch.clamp(outputs, min=1e-5, max=1. - 1e-5)
+        # loss = -1. * (rel * torch.log(Y_prob) + (1. - rel) * torch.log(1. - Y_prob))  # negative log bernoulli
         loss = F.binary_cross_entropy_with_logits(outputs, rel.unsqueeze(1))
         # logit_matrix = torch.cat([tp_cos.unsqueeze(1), tn_cos.unsqueeze(1)], dim=1)  # [B, 2]
         # lsm = F.log_softmax(logit_matrix, dim=1)
@@ -72,6 +77,8 @@ class QueryTableMatcher(pl.LightningModule):
         # print(rel)
         # bce with logits = bce loss + sigmoid
         loss = F.binary_cross_entropy_with_logits(outputs, rel.unsqueeze(1))
+        # Y_prob = torch.clamp(outputs, min=1e-5, max=1. - 1e-5)
+        # loss = -1. * (rel * torch.log(Y_prob) + (1. - rel) * torch.log(1. - Y_prob))  # negative log bernoulli
         # logit_matrix = torch.cat([tp_cos.unsqueeze(1), tn_cos.unsqueeze(1)], dim=1)  # [B, 2]
         # lsm = F.log_softmax(logit_matrix, dim=1)
         # loss = -1.0 * lsm[:, 0]
@@ -140,12 +147,13 @@ class QueryTableMatcher(pl.LightningModule):
     def add_model_specific_args(parser):
         # parser.add_argument("--bert_path", default=None, type=str, required=True)
         parser.add_argument("--tabert_path", default=None, type=str, required=True)
+        parser.add_argument("--config_file", default=None, type=str, required=True)
         parser.add_argument("--lr", default=5e-5, type=float, help="The initial learning rate")
         # parser.add_argument("--qmodel_lr", default=1e-5,
         #                     type=float, help="The initial learning rate for query model.")
         # parser.add_argument("--tmodel_lr", default=1e-5,
         #                     type=float, help="The initial learning rate for table model.")
-        parser.add_argument("--weight_decay", default=0.0, type=float, help="Weight decay if we apply some.")
+        parser.add_argument("--weight_decay", default=0.1, type=float, help="Weight decay if we apply some.")
         parser.add_argument("--adam_epsilon", default=1e-8, type=float, help="Epsilon for Adam optimizer.")
         parser.add_argument("--warmup", default=0, type=int, help="Linear warmup over warmup_steps.")
         # parser.add_argument("--qmodel_warmup", default=5000, type=int, help="Linear warmup over warmup_steps.")

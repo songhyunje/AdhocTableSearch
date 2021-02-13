@@ -1,16 +1,21 @@
 import itertools
 import json
 import os
-import random
 from math import ceil
 from collections import defaultdict
 from pathlib import Path
+import re
 
 import torch
 from torch.utils.data import DataLoader, Dataset
 from transformers import BertTokenizer, BertModel
 
 from table_bert import Table, Column, TableBertModel
+
+
+html_pattern = re.compile(r'<\w+ [^>]*>([^<]+)</\w+>')
+tag_pattern = re.compile(r'<.*?>')
+link_pattern = re.compile(r'\[.*?\|.*?\]')
 
 
 class QueryTableDataset(Dataset):
@@ -77,19 +82,59 @@ class QueryTableDataset(Dataset):
                 caption = raw_json['caption']
                 heading = raw_json['title']
                 body = raw_json['data']
+                numericIdx = raw_json['numericColumns']
+
+                # Heading preprocessing + link remove
+                heading_str = ' '.join(heading)
+                if html_pattern.search(heading_str):
+                    if link_pattern.search(heading_str): # 같이 있는 경우 
+                        heading = [re.sub(tag_pattern, '', column).strip() for column in heading]
+                        for idx, column in enumerate(heading):
+                            if link_pattern.search(column):
+                                real_text = link_pattern.search(column).group().split('|')[-1][:-1].strip()
+                                heading[idx] = real_text
+                    else:
+                        heading = [re.sub(html_pattern, '', column).strip() for column in heading]
+                
+                # Row preporcessing + link remove 
+
+                cell_sum_str = ''
+                for rows in body:
+                    cell_sum_str += ' '.join(rows)
+
+                if html_pattern.search(cell_sum_str):
+                    if link_pattern.search(cell_sum_str): # 같이 있으면                    
+                        for i, rows in enumerate(body):
+                            for j, cell in enumerate(rows):
+                                if link_pattern.search(cell):
+                                    cell = re.sub(tag_pattern, '', cell).strip()
+                                    real_text = link_pattern.search(cell).group().split('|')[-1][:-1]
+                                    body[i][j] = real_text
+                                else:
+                                    cell = re.sub(html_pattern, '', cell).strip()
+                                    body[i][j] = cell
+
+                    else:
+                        row_list = []
+                        for rows in body:
+                            row_list.append([re.sub(html_pattern, '', row).strip() for row in rows])
+                        body = row_list
 
                 if col == 0 or row == 0:
                     continue
+
+                # Infer column type
+                heading_type = infer_column_type_from_row_values(numericIdx, heading, body)
 
                 # TODO: caption을 다양하게 주는부분, 비교실험 해볼부분임
                 caption = " ".join(heading) + " " + title + " " + secTitle + " " + caption
                 caption_rep = table_tokenizer.tokenize(caption)
 
                 if self.is_slice:
-                    column_reps = slice_table(title, heading, body, table_tokenizer)
+                    column_reps = slice_table(title, heading, body, table_tokenizer, heading_type)
                 else:
                     column_reps = [Table(id=title,
-                                       header=[Column(h.strip(), 'text') for h in heading],
+                                       header=[Column(h.strip(), heading_type.get(h, 'text')) for h in heading],
                                        data=body
                                        ).tokenize(table_tokenizer)]
                 rel = 1 if int(rel) > 0 else 0
@@ -126,11 +171,11 @@ def query_table_collate_fn(batch):
     # return query, columns, captions, torch.Tensor(rel)
 
 
-def slice_table(title, heading, datas, table_tokenizer):
+def slice_table(title, heading, datas, table_tokenizer, heading_type):
     table_rep_list = []
 
-    min_row = 10        # 최소 10개의 행은 있어야 함
-    max_table_nums = 3  # 테이블은 최대 10개로 나뉘어짐
+    min_row = 10         # 최소 10개의 행은 있어야 함
+    max_table_nums = 10  # 테이블은 최대 10개로 나뉘어짐
     """
     시나리오, 최소행 = 5, 최대테이블 = 10 이라고 할 때 
     30행 테이블은 => 5행테이블 x 6개로 쪼개져야하고 
@@ -138,7 +183,7 @@ def slice_table(title, heading, datas, table_tokenizer):
     """
     if len(datas) <= min_row: # 애초에 테이블이 최소행 보다 작은 경우
         column_rep = Table(id=title,
-                           header=[Column(h.strip(), 'text') for h in heading],
+                           header=[Column(h.strip(), heading_type.get(h, 'text')) for h in heading],
                            data=datas
                            ).tokenize(table_tokenizer)
         table_rep_list.append(column_rep)
@@ -147,12 +192,25 @@ def slice_table(title, heading, datas, table_tokenizer):
         slice_row_data = [datas[i * row_n:(i + 1) * row_n] for i in range((len(datas) + row_n - 1) // row_n)]
         for rows in slice_row_data:
             column_rep = Table(id=title,
-                               header=[Column(h.strip(), 'text') for h in heading],
+                               header=[Column(h.strip(), heading_type.get(h, 'text')) for h in heading],
                                data=rows
                                ).tokenize(table_tokenizer)
             table_rep_list.append(column_rep)
 
     return table_rep_list
+
+
+def infer_column_type_from_row_values(numeric_idx_list, heading, body):
+    heading_type = {k : 'text' for k in heading}
+    for n_idx in numeric_idx_list:
+        heading_type[heading[n_idx]] = 'real'
+        for i, rows in enumerate(body):
+            try:
+                float(rows[n_idx].strip().replace('−','-').replace(',','').replace('–','-'))
+            except:
+                heading_type[heading[n_idx]] = 'text'
+                break
+    return heading_type
 
 
 class TableDataset(Dataset):
@@ -195,9 +253,6 @@ class TableDataset(Dataset):
                 # 테이블 기본 Meta data 파싱
                 jsonStr = json.loads(line)
                 tableId = jsonStr['docid']
-                # query = jsonStr['query']
-                # qid = jsonStr['qid']
-                # rel = jsonStr['rel']
 
                 # Raw Json 파싱
                 raw_json = json.loads(jsonStr['table']['raw_json'])
@@ -209,18 +264,58 @@ class TableDataset(Dataset):
                 caption = raw_json['caption']
                 heading = raw_json['title']
                 body = raw_json['data']
+                numericIdx = raw_json['numericColumns']
+
+                # Heading preprocessing + link remove
+                heading_str = ' '.join(heading)
+                if html_pattern.search(heading_str):
+                    if link_pattern.search(heading_str): # 같이 있는 경우 
+                        heading = [re.sub(tag_pattern, '', column).strip() for column in heading]
+                        for idx, column in enumerate(heading):
+                            if link_pattern.search(column):
+                                real_text = link_pattern.search(column).group().split('|')[-1][:-1].strip()
+                                heading[idx] = real_text
+                    else:
+                        heading = [re.sub(html_pattern, '', column).strip() for column in heading]
+                
+                # Row preporcessing + link remove 
+
+                cell_sum_str = ''
+                for rows in body:
+                    cell_sum_str += ' '.join(rows)
+
+                if html_pattern.search(cell_sum_str):
+                    if link_pattern.search(cell_sum_str): # 같이 있으면                    
+                        for i, rows in enumerate(body):
+                            for j, cell in enumerate(rows):
+                                if link_pattern.search(cell):
+                                    cell = re.sub(tag_pattern, '', cell).strip()
+                                    real_text = link_pattern.search(cell).group().split('|')[-1][:-1]
+                                    body[i][j] = real_text
+                                else:
+                                    cell = re.sub(html_pattern, '', cell).strip()
+                                    body[i][j] = cell
+
+                    else:
+                        row_list = []
+                        for rows in body:
+                            row_list.append([re.sub(html_pattern, '', row).strip() for row in rows])
+                        body = row_list
 
                 if col == 0:
                     heading = ['']
                 if row == 0:
                     body = [['']]
 
+                # Infer column type
+                heading_type = infer_column_type_from_row_values(numericIdx, heading, body)
+
                 if self.is_slice:
-                    column_reps = slice_table(title, heading, body, table_tokenizer)
+                    column_reps = slice_table(title, heading, body, table_tokenizer, heading_type)
 
                 else:
                     column_reps = [Table(id=title,
-                                       header=[Column(h.strip(), 'text') for h in heading],
+                                       header=[Column(h.strip(), heading_type.get(h, 'text')) for h in heading],
                                        data=body
                                        ).tokenize(table_tokenizer)]
 

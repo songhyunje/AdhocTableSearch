@@ -64,7 +64,7 @@ def add_generic_arguments(parser):
 
 
 def main(args):
-    model = QueryTableMatcher.load_from_checkpoint(args.ckpt_file)
+    model = QueryTableMatcher.load_from_checkpoint(args.ckpt_file, map_location=lambda storage, loc: storage.cuda(0))
     model.to(device)
     # model.freeze()
     model.eval()
