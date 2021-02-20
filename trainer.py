@@ -15,14 +15,6 @@ from model import QueryTableMatcher
 logger = logging.getLogger(__name__)
 
 
-def set_seed(args):
-    random.seed(args.seed)
-    np.random.seed(args.seed)
-    torch.manual_seed(args.seed)
-    if args.gpus > 0:
-        torch.cuda.manual_seed_all(args.seed)
-
-
 def train(args):
     checkpoint_callback = pl.callbacks.ModelCheckpoint(
         dirpath=args.output_dir,
@@ -44,8 +36,7 @@ def train(args):
         name='lightning_logs'
     )
 
-    set_seed(args)
-    # pl.seed_everything(args.seed)
+    pl.seed_everything(args.seed)
     data_module = QueryTableDataModule(args)
 
     train_params = {}
@@ -81,7 +72,7 @@ def add_generic_arguments(parser):
                         )
     parser.add_argument("--sync_batchnorm", action="store_true",
                         help="Enable synchronization between batchnorm layers across all GPUs.")
-    parser.add_argument("--seed", type=int, default=1234, help="random seed for initialization")
+    parser.add_argument("--seed", type=int, default=20200401, help="random seed for initialization")
     parser.add_argument("--resume_from_checkpoint", type=str, default=None)
     parser.add_argument("--val_check_interval", default=1.0, type=float)
 

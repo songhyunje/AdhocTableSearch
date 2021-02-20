@@ -1,6 +1,6 @@
 #!/bin/bash
 
-for i in {1..1}
+for i in {1..5}
 do
     DATA=./data/$i
     echo $DATA
@@ -21,7 +21,7 @@ do
                       --config_file ./model/tabert_base_k3/tb_config.json \
                       --gpus 1 \
                       --precision 16 \
-                      --max_epochs 5 \
+                      --max_epochs 10 \
                       --lr 5e-5 \
                       --do_train \
                       --gradient_clip_val 1.0 \
