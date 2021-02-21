@@ -159,6 +159,8 @@ class QueryTableMatcher(pl.LightningModule):
         # parser.add_argument("--qmodel_warmup", default=5000, type=int, help="Linear warmup over warmup_steps.")
         # parser.add_argument("--tmodel_warmup", default=2000, type=int, help="Linear warmup over warmup_steps.")
         parser.add_argument("--max_epochs", default=10, type=int, help="Number of training epochs")
+        parser.add_argument("--min_rows", default=10, type=int, help="Minimum number of rows")
+        parser.add_argument("--max_tables", default=10, type=int, help="Maximum number of sub-tables in a table")
         parser.add_argument("--train_batch_size", default=2, type=int, help="Number of training epochs")
         parser.add_argument("--valid_batch_size", default=2, type=int, help="Number of training epochs")
         parser.add_argument("--test_batch_size", default=2, type=int, help="Number of training epochs")

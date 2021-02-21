@@ -21,13 +21,15 @@ link_pattern = re.compile(r'\[.*?\|.*?\]')
 class QueryTableDataset(Dataset):
     def __init__(self, data_dir: str = '.data', data_type: str = 'train',
                  query_tokenizer=None, table_tokenizer=None, max_query_length=15,
+                 min_rows=10, max_tables=10,
                  prepare=False, is_slice=True):
         self.data_dir = data_dir
-        self.ids_file = data_type + '.pair'
+        self.ids_file = f'{data_type}_{min_rows}_{max_tables}.pair'
         self.data_type = data_type  # test, train 구분하기위해
         self.is_slice = is_slice
         if prepare:
-            self.prepare(data_dir, data_type, query_tokenizer, table_tokenizer, max_query_length)
+            self.prepare(data_dir, data_type, query_tokenizer, table_tokenizer, max_query_length,
+                         min_rows=min_rows, max_tables=max_tables)
 
         self.data = torch.load(os.path.join(self.processed_folder, self.ids_file))
 
@@ -37,7 +39,7 @@ class QueryTableDataset(Dataset):
     def __getitem__(self, index):
         return self.data[index]
 
-    def prepare(self, data_dir, data_type, query_tokenizer, table_tokenizer, max_query_length):
+    def prepare(self, data_dir, data_type, query_tokenizer, table_tokenizer, max_query_length, min_rows, max_tables):
         if self._check_exists():
             return
 
@@ -131,7 +133,7 @@ class QueryTableDataset(Dataset):
                 caption_rep = table_tokenizer.tokenize(caption)
 
                 if self.is_slice:
-                    column_reps = slice_table(title, heading, body, table_tokenizer, heading_type)
+                    column_reps = slice_table(title, heading, body, table_tokenizer, heading_type, min_rows, max_tables)
                 else:
                     column_reps = [Table(id=title,
                                        header=[Column(h.strip(), heading_type.get(h, 'text')) for h in heading],
@@ -167,28 +169,26 @@ def query_table_collate_fn(batch):
 
     return query, columns, caption, torch.Tensor(rel)
 
-    # captions = [caption] * len(columns)
-    # return query, columns, captions, torch.Tensor(rel)
 
-
-def slice_table(title, heading, datas, table_tokenizer, heading_type):
-    table_rep_list = []
-
-    min_row = 10         # 최소 10개의 행은 있어야 함
-    max_table_nums = 10  # 테이블은 최대 10개로 나뉘어짐
+def slice_table(title, heading, datas, table_tokenizer, heading_type, min_rows=10, max_table_nums=10):
     """
+    min_rows: 최소 행 개수
+    max_table_nums: 최대 테이블 개수
+
     시나리오, 최소행 = 5, 최대테이블 = 10 이라고 할 때 
     30행 테이블은 => 5행테이블 x 6개로 쪼개져야하고 
     300행은 => 5행 x 60개가 아닌, 30행 x 10개로 쪼개져야함 
     """
-    if len(datas) <= min_row: # 애초에 테이블이 최소행 보다 작은 경우
+
+    table_rep_list = []
+    if len(datas) <= min_rows:  # 애초에 테이블이 최소행 보다 작은 경우
         column_rep = Table(id=title,
                            header=[Column(h.strip(), heading_type.get(h, 'text')) for h in heading],
                            data=datas
                            ).tokenize(table_tokenizer)
         table_rep_list.append(column_rep)
     else:
-        row_n = max(min_row, ceil(len(datas) / max_table_nums))
+        row_n = max(min_rows, ceil(len(datas) / max_table_nums))
         slice_row_data = [datas[i * row_n:(i + 1) * row_n] for i in range((len(datas) + row_n - 1) // row_n)]
         for rows in slice_row_data:
             column_rep = Table(id=title,
@@ -215,13 +215,14 @@ def infer_column_type_from_row_values(numeric_idx_list, heading, body):
 
 class TableDataset(Dataset):
     def __init__(self, data_dir: str = '.data', data_type: str = 'test', table_tokenizer=None, 
+                 min_rows=10, max_tables=10,
                  prepare=False, is_slice=True):
         self.data_dir = data_dir
-        self.table_file = data_type + '.table'
+        self.table_file = f'{data_type}_{min_rows}_{max_tables}.table'
         self.is_slice = is_slice
 
         if prepare:
-            self.prepare(data_type, table_tokenizer)
+            self.prepare(data_type, table_tokenizer, min_rows, max_tables)
 
         self.tables = torch.load(os.path.join(self.processed_folder, self.table_file))
 
@@ -231,7 +232,7 @@ class TableDataset(Dataset):
     def __getitem__(self, index):
         return self.tables[index]
 
-    def prepare(self, data_type, table_tokenizer):
+    def prepare(self, data_type, table_tokenizer, min_rows, max_tables):
         if self._check_exists():
             return
 
@@ -311,7 +312,7 @@ class TableDataset(Dataset):
                 heading_type = infer_column_type_from_row_values(numericIdx, heading, body)
 
                 if self.is_slice:
-                    column_reps = slice_table(title, heading, body, table_tokenizer, heading_type)
+                    column_reps = slice_table(title, heading, body, table_tokenizer, heading_type, min_rows, max_tables)
 
                 else:
                     column_reps = [Table(id=title,

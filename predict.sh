@@ -10,11 +10,13 @@ do
     echo ${CKPT}
     python dense_retrieval.py --data_dir ${DATA} \
                               --gpus 1 \
+			      --topk 500 \
                               --ckpt_file ./output/${i}/${CKPT} \
                               --hnsw_index | tee ./result/${i}_hnsw.result
     
     python dense_retrieval.py --data_dir ${DATA} \
                               --gpus 1 \
+			      --topk 500 \
                               --ckpt_file ./output/${i}/${CKPT} | tee ./result/${i}.result
 done
 

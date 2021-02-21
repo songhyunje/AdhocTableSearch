@@ -20,6 +20,8 @@ class QueryTableDataModule(pl.LightningDataModule):
 
         self.train_batch_size = params.train_batch_size
         self.valid_batch_size = params.valid_batch_size
+        self.min_rows = params.min_rows
+        self.max_tables = params.max_tables
 
     def prepare_data(self):
         # Download, tokenize, etc
@@ -27,6 +29,8 @@ class QueryTableDataModule(pl.LightningDataModule):
         QueryTableDataset(data_dir=self.data_dir, data_type='train',
                           query_tokenizer=self.query_tokenizer,
                           table_tokenizer=self.table_tokenizer,
+                          min_rows=self.min_rows,
+                          max_tables=self.max_tables,
                           prepare=True)
         # QueryTablePredictionDataset(data_dir=self.data_dir, data_type='test',
         #                             query_tokenizer=self.query_tokenizer,
@@ -35,7 +39,10 @@ class QueryTableDataModule(pl.LightningDataModule):
 
     def setup(self, stage=None):
         if stage == 'fit' or stage is None:
-            table_full = QueryTableDataset(data_dir=self.data_dir, data_type='train')
+            table_full = QueryTableDataset(data_dir=self.data_dir, 
+                                           data_type='train',
+                                           min_rows=self.min_rows,
+                                           max_tables=self.max_tables)
             self.train, self.valid = random_split(table_full, [len(table_full) - int(len(table_full) * 0.1),
                                                                int(len(table_full) * 0.1)])
 
