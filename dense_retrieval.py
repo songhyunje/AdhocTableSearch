@@ -54,7 +54,7 @@ def add_generic_arguments(parser):
     parser.add_argument("--data_dir", default=None, type=str, required=True, help="The input data dir.")
     parser.add_argument("--ckpt_file", default=None, type=str, required=True, help="The ckpt file")
     parser.add_argument("--gpus", type=int)
-    parser.add_argument("--topk", default=1000, type=int)
+    parser.add_argument("--topk", default=300, type=int)
     parser.add_argument('--batch_size', type=int, default=1, help="Batch size for query encoder forward pass")
     parser.add_argument('--index_buffer', type=int, default=50000,
                         help="Temporal memory data buffer size (in samples) for indexer")
@@ -131,7 +131,7 @@ def main(args):
 
     time0 = time.time()
     top_ids_and_scores = index.search_knn(np.array(query_vectors), args.topk)
-    print('index search time: %f sec.', time.time() - time0)
+    # print('index search time: %f sec.', time.time() - time0)
 
     # evaluation 
     qrel_dict = get_qrel_dict(args)

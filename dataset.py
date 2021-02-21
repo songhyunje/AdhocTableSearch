@@ -240,7 +240,7 @@ class TableDataset(Dataset):
         if not table_tokenizer:
             raise RuntimeError('Tokenizers are not found.' +
                                ' You must set table_tokenizer')
-        print('Processing...')
+        # print('Processing...')
 
         tables = []
         path = Path(self.data_dir + '/' + data_type + '.jsonl')
@@ -327,7 +327,7 @@ class TableDataset(Dataset):
         # Save
         with open(os.path.join(processed_dir, self.table_file), 'wb') as f:
             torch.save(tables, f)
-        print('Done!')
+        # print('Done!')
 
     @property
     def processed_folder(self):

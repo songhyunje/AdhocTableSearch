@@ -25,10 +25,10 @@ do
                       --lr 5e-5 \
                       --do_train \
                       --gradient_clip_val 1.0 \
-                      --train_batch_size 8 \
+                      --train_batch_size 4 \
                       --valid_batch_size 2 \
                       --output_dir output/${i} \
-                      --accumulate_grad_batches 8
+                      --accumulate_grad_batches 16
     
     CKPT=`ls output/${i} | sort -k3 -t'=' | head -1`
     

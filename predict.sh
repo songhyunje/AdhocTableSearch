@@ -17,3 +17,5 @@ do
                               --gpus 1 \
                               --ckpt_file ./output/${i}/${CKPT} | tee ./result/${i}.result
 done
+
+python predict.py
