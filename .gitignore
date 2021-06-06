@@ -6,7 +6,7 @@ __pycache__/
 *.swp
 *.dpr
 
-data/
+data/**
 lightning_logs/
 table_bert/__pycache__/
 table_bert/vertical/__pycache__/

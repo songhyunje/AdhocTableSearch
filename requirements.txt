@@ -1,10 +1,10 @@
 torch
 transformers==3.2
-pytorch-lightning==1.2.0
-gdown
+pytorch-lightning
+fairseq==0.8.0
 torch-scatter
 ujson
-redis
 msgpack
-fairseq==0.8.0
+redis
 h5py
+gdown

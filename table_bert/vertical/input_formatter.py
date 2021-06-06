@@ -21,7 +21,7 @@ from table_bert.table_bert import MAX_BERT_INPUT_LENGTH
 
 # noinspection PyMethodOverriding
 from table_bert.vertical.config import VerticalAttentionTableBertConfig
-
+from nltk import ngrams
 
 class VerticalAttentionTableBertInputFormatter(VanillaTableBertInputFormatter):
     def __init__(self, config: VerticalAttentionTableBertConfig, tokenizer: BertTokenizer):
@@ -35,10 +35,47 @@ class VerticalAttentionTableBertInputFormatter(VanillaTableBertInputFormatter):
 
         self.column_span_method = column_span_method
 
+    # add def by
+    def get_row_highest_ngram(self, context, row_data, n=2, k=3):
+        # Compute N-Gram overlap
+        row_score_dict = {k: 0 for k in range(len(row_data))}
+        row_text_sum_list = []
+        for row in row_data:
+            sum_of_row = []
+            for cell in row:
+                sum_of_row += cell
+            row_text_sum_list.append(sum_of_row)
+
+        for idx, row in enumerate(row_text_sum_list):
+            row_bigram = list(ngrams(row, n))
+            row_bigram_len = len(row_bigram)
+            if row_bigram_len == 0:
+                row_score_dict[idx] = -1
+                continue
+            overlap_cnt = 0
+
+            context_bigram = list(ngrams(context, n))
+            for c_gram in context_bigram:
+                for r_gram in row_bigram:
+                    if ' '.join(c_gram).lower() in ' '.join(r_gram).lower():
+                        overlap_cnt += 1
+
+            row_score_dict[idx] = overlap_cnt / float(row_bigram_len)
+
+        sorted_score_dict = sorted(row_score_dict.items(), key=lambda x: x[1], reverse=True)
+        select_row_data = []
+        for idx, ratio in sorted_score_dict[:k]:
+            select_row_data.append(row_data[idx])
+        return select_row_data
+
     def get_input(self, context: List[str], table: Table):
         row_instances = []
+        # Origin Code
+        #table_data = table.data[:self.config.sample_row_num]
 
-        table_data = table.data[:self.config.sample_row_num]
+        # Add content select by N-GRAM overap ratio
+        # table_data = self.get_row_highest_ngram(context, table.data, n=2, k=self.config.sample_row_num)
+        table_data = table.data 
 
         for row_data in table_data:
             if isinstance(row_data, dict):

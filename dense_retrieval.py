@@ -55,7 +55,7 @@ def add_generic_arguments(parser):
     parser.add_argument("--ckpt_file", default=None, type=str, required=True, help="The ckpt file")
     parser.add_argument("--gpus", type=int)
     parser.add_argument("--topk", default=300, type=int)
-    parser.add_argument('--batch_size', type=int, default=1, help="Batch size for query encoder forward pass")
+    parser.add_argument('--batch_size', type=int, default=2, help="Batch size for query encoder forward pass")
     parser.add_argument('--index_buffer', type=int, default=50000,
                         help="Temporal memory data buffer size (in samples) for indexer")
     parser.add_argument("--hnsw_index", action='store_true', help='If enabled, use inference time efficient HNSW index')
@@ -64,6 +64,7 @@ def add_generic_arguments(parser):
 
 
 def main(args):
+    # Restoring Training State
     model = QueryTableMatcher.load_from_checkpoint(args.ckpt_file, map_location=lambda storage, loc: storage.cuda(0))
     model.to(device)
     model.eval()
@@ -85,6 +86,7 @@ def main(args):
         table_dataset = TableDataset(data_dir=args.data_dir, 
                                      data_type='test',
                                      table_tokenizer=table_tokenizer,
+                                     min_row=model.hparams['min_row'],
                                      prepare=True,
                                      )
         dataloader = DataLoader(table_dataset,
@@ -95,13 +97,13 @@ def main(args):
         with torch.no_grad():
             for i, d in enumerate(dataloader, 1):
                 table_id, columns, captions = d 
-                try:
-                    values = model.table_forward(columns, captions)
-                except:
-                    continue
-               
+                values = model.table_forward(columns, captions)
                 for tid, vector in zip(table_id, values):
                     table_vectors.append((tid, vector.cpu().numpy())) 
+
+                # print(values.shape)
+                # for tid, vector in zip(table_id, values):
+                #     table_vectors.append((tid, vector.cpu().numpy())) 
                 # print(f"epoch: {i}")
         
         index.index_data(table_vectors)

@@ -2,15 +2,13 @@ import argparse
 import logging
 import os
 from pathlib import Path
-import random
-import numpy as np
-import torch
 
 import pytorch_lightning as pl
 from pytorch_lightning.loggers import TensorBoardLogger
 
 from data_module import QueryTableDataModule
 from model import QueryTableMatcher
+import torch
 
 logger = logging.getLogger(__name__)
 
@@ -18,14 +16,14 @@ logger = logging.getLogger(__name__)
 def train(args):
     checkpoint_callback = pl.callbacks.ModelCheckpoint(
         dirpath=args.output_dir,
-        filename='{epoch:02d}-{val_loss:.2f}',
+        filename='{epoch:02d}',
         prefix="checkpoint",
         monitor="val_loss",
         verbose=True,
         mode="min",
-        save_top_k=3
+        save_top_k=5
     )
-
+    #filename='{epoch:02d}-{val_loss:.2f}',
     output_dir = Path(args.output_dir)
     output_dir.mkdir(exist_ok=True)
 
@@ -35,8 +33,8 @@ def train(args):
         version=1,
         name='lightning_logs'
     )
-
-    pl.seed_everything(args.seed)
+   
+    pl.utilities.seed.seed_everything(args.seed)
     data_module = QueryTableDataModule(args)
 
     train_params = {}
@@ -44,6 +42,7 @@ def train(args):
         train_params["accelerator"] = "ddp"
 
     train_params["accumulate_grad_batches"] = args.accumulate_grad_batches
+    train_params["profiler"] = args.profiler 
 
     model = QueryTableMatcher(args)
     trainer = pl.Trainer.from_argparse_args(args,
@@ -64,9 +63,10 @@ def add_generic_arguments(parser):
     parser.add_argument("--fast_dev_run", action="store_true")
     parser.add_argument("--gpus", type=int)
     parser.add_argument("--gradient_clip_val", default=0.0, type=float, help="Gradient clipping value")
+    parser.add_argument("--stocahstic_weight_avg", action="store_true", help="Stochastic Weight Averaging")
     parser.add_argument("--precision", default=32, type=int, help="Precision")
     parser.add_argument("--do_train", action="store_true", help="Whether to run training.")
-    parser.add_argument("--do_predict", action="store_true", help="Whether to run predictions on the test set.")
+    parser.add_argument("--profiler", default="simple", help="Profiler")
     parser.add_argument("--accumulate_grad_batches", type=int, default=5,
                         help="Number of updates steps to accumulate before performing a backward/update pass.",
                         )
