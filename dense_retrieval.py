@@ -55,7 +55,7 @@ def add_generic_arguments(parser):
     parser.add_argument("--ckpt_file", default=None, type=str, required=True, help="The ckpt file")
     parser.add_argument("--gpus", type=int)
     parser.add_argument("--topk", default=300, type=int)
-    parser.add_argument('--batch_size', type=int, default=2, help="Batch size for query encoder forward pass")
+    parser.add_argument('--batch_size', type=int, default=4, help="Batch size for query encoder forward pass")
     parser.add_argument('--index_buffer', type=int, default=50000,
                         help="Temporal memory data buffer size (in samples) for indexer")
     parser.add_argument("--hnsw_index", action='store_true', help='If enabled, use inference time efficient HNSW index')
@@ -140,8 +140,7 @@ def main(args):
     result = {}
     for qid, id_and_score in zip(qids, top_ids_and_scores):
         retrieved = {}
-        for index, score in zip(id_and_score[0], id_and_score[1]):
-            tid = '-'.join(index.split('-')[:3])
+        for tid, score in zip(id_and_score[0], id_and_score[1]):
             if tid in retrieved:
                 continue
             retrieved[tid] = score

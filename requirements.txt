@@ -4,7 +4,10 @@ pytorch-lightning
 fairseq==0.8.0
 torch-scatter
 ujson
+pandas
 msgpack
 redis
 h5py
 gdown
+zmq
+nltk
