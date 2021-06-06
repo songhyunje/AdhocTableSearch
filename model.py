@@ -14,7 +14,7 @@ class QueryTableMatcher(pl.LightningModule):
         super().__init__()
         self.hparams = hparams
         self.Tmodel = TableBertModel.from_pretrained(self.hparams.tabert_path, self.hparams.config_file)
-        # self.norm = nn.LayerNorm(768)
+        self.norm = nn.LayerNorm(768)
 
         # attention
         self.attention = nn.Sequential(
@@ -28,7 +28,7 @@ class QueryTableMatcher(pl.LightningModule):
         #     nn.Sigmoid()
         # )
 
-    def forward(self, query, columns, captions):
+    def forward(self, query, tables, captions):
         # use cls vector 
         query_tokens = self.Tmodel.bert(**query)[0]            # B x Q x d
         # query = self.norm(query_tokens[:, 0, :])  # B x d
@@ -36,13 +36,10 @@ class QueryTableMatcher(pl.LightningModule):
         # for loop is terrible,
         # but it has no choice but to use it!
         reps = []  # B x 768
-        for q, column, caption in zip(query, columns, captions):
-            context_encoding, column_encoding, _ = self.Tmodel.encode(contexts=caption, tables=column)
-            # concat_encoding = self.norm(context_encoding[:, 0, :] + torch.mean(column_encoding, dim=1))
-            # print(concat_encoding.shape)
-
-            # H = self.norm(context_encoding[:, 0, :] + torch.mean(column_encoding, dim=1))
-            H = context_encoding[:, 0, :] + torch.mean(column_encoding, dim=1)
+        for q, table, caption in zip(query, tables, captions):
+            context_encoding, table_encoding, _ = self.Tmodel.encode(contexts=caption, tables=table)
+            H = self.norm(context_encoding[:, 0, :] + torch.mean(table_encoding, dim=1))
+            # H = context_encoding[:, 0, :] + torch.mean(table_encoding, dim=1)
 
             # 이 부분을 밖으로 빼면 될 듯 한데...
             # H = q * concat_encoding  # subN x 768
@@ -70,8 +67,8 @@ class QueryTableMatcher(pl.LightningModule):
         # return self.linear(torch.stack(reps))   # B x 1
 
     def training_step(self, batch, batch_idx):
-        query, columns, captions, rel = batch
-        outputs = self(query, columns, captions)
+        query, tables, captions, rel = batch
+        outputs = self(query, tables, captions)
         loss = F.binary_cross_entropy_with_logits(outputs, rel.unsqueeze(1))
         # logit_matrix = torch.cat([tp_cos.unsqueeze(1), tn_cos.unsqueeze(1)], dim=1)  # [B, 2]
         # lsm = F.log_softmax(logit_matrix, dim=1)
@@ -85,20 +82,15 @@ class QueryTableMatcher(pl.LightningModule):
         return loss.mean()
 
     def validation_step(self, batch, batch_idx):
-        query, columns, captions, rel = batch
-        outputs = self(query, columns, captions)
+        query, tables, captions, rel = batch
+        outputs = self(query, tables, captions)
         # tp_cos, tn_cos = self(*batch)
         # nbatch = tp_cos.size(0)
         # target = torch.ones(nbatch, device=self.device)
         loss = F.binary_cross_entropy_with_logits(outputs, rel.unsqueeze(1))
         # loss = self.criterion(tp_cos, tn_cos, target)
         self.log('val_loss', loss.mean())
-
-    def test_step(self, batch, batch_idx):
-        q, column, caption, _, qid, tid = batch
-        score = self.infer(q, column, caption)
-        with open(self.hparams.output_file, 'a') as f:
-            f.write("{},{},{}\n".format(qid[0], tid[0], abs(score.item())))
+        return loss.mean()
 
     def query_forward(self, query):
         # return self.norm(self.Tmodel.bert(**query)[1])  # B x d
@@ -106,12 +98,11 @@ class QueryTableMatcher(pl.LightningModule):
         # return self.norm(query_tokens[:, 0, :])  # B x d
         return F.normalize(query_tokens[:, 0, :], p=2, dim=1)
 
-    def table_forward(self, columns, captions):
+    def table_forward(self, tables, captions):
         reps = []
-        for column, caption in zip(columns, captions):
-            context_encoding, column_encoding, _ = self.Tmodel.encode(contexts=caption, tables=column)
-            # H = self.norm(context_encoding[:, 0, :] + torch.mean(column_encoding, dim=1))
-            H = context_encoding[:, 0, :] + torch.mean(column_encoding, dim=1)
+        for table, caption in zip(tables, captions):
+            context_encoding, table_encoding, _ = self.Tmodel.encode(contexts=caption, tables=table)
+            H = self.norm(context_encoding[:, 0, :] + torch.mean(table_encoding, dim=1))
 
             # Attention pooling
             A = self.attention(H)         # subN x 1

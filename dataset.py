@@ -52,37 +52,9 @@ def encode_tables(table_json, is_slice, query, table_tokenizer, min_row):
 
     body = raw_json['relation']
     if tableOrientation == "HORIZONTAL":
-        # col_cnt = len(table_data)
-        # row_cnt = len(table_data[0])
-
-        # for row in range(row_cnt):
-        #     tmp_row_data = []
-        #     for col in range(col_cnt):
-        #         tmp_row_data.append(table_data[col][row])
-        #     body.append(tmp_row_data)
         body = list(map(list, zip(*body)))  # transpose
 
-        # Header
-        # for table_col in table_data:
-        #     heading.append(table_col[0])
-
-    # else:  # tableOrientation == "VERTICAL":
-    #     body = table_data
-        # col_cnt = len(table_data)
-        # row_cnt = len(table_data[0])
-
-        # for row in range(row_cnt):
-        #     tmp_row_data = []
-        #     for col in range(col_cnt):
-        #         tmp_row_data.append(table_data[col][row])
-        #     body.append(tmp_row_data)
-
-        # Header
-        # for table_col in table_data:
-        #     heading.append(table_col[0])
-
     header = body[headerRowIndex] if hasHeader else [''] * len(body[0])
-
     # Heading preprocessing + link remove
     # heading_str = ' '.join(heading)
     # if html_pattern.search(heading_str):
@@ -131,10 +103,10 @@ def encode_tables(table_json, is_slice, query, table_tokenizer, min_row):
                            ).tokenize(table_tokenizer)]
 
     # memory issues!
-    if len(table_reps) > 3:# 
-        table_reps = table_reps[:3]
+    if len(table_reps) > 5:# 
+        table_reps = table_reps[:5]
 
-    return caption_rep, table_reps
+    return table_reps, caption_rep
 
 
 def slice_table(title, heading, data, caption, table_tokenizer, min_row):
@@ -231,15 +203,13 @@ def slice_table(title, heading, data, caption, table_tokenizer, min_row):
 class QueryTableDataset(Dataset):
     def __init__(self, data_dir: str = '.data', data_type: str = 'train',
                  query_tokenizer=None, table_tokenizer=None, max_query_length=7,
-                 min_row=256, max_tables=2,
-                 prepare=False, is_slice=True):
+                 min_row=30, prepare=False, is_slice=True):
         self.data_dir = data_dir
-        self.ids_file = f'{data_type}_{min_row}_{max_tables}.pair'
+        self.ids_file = f'{data_type}_{min_row}.pair'
         self.data_type = data_type
         self.is_slice = is_slice
         if prepare:
-            self.prepare(data_dir, data_type, query_tokenizer, table_tokenizer, max_query_length,
-                         min_row=min_row, max_tables=max_tables)
+            self.prepare(data_dir, data_type, query_tokenizer, table_tokenizer, max_query_length, min_row=min_row)
 
         self.data = torch.load(os.path.join(self.processed_folder, self.ids_file))
 
@@ -249,7 +219,7 @@ class QueryTableDataset(Dataset):
     def __getitem__(self, index):
         return self.data[index]
 
-    def prepare(self, data_dir, data_type, query_tokenizer, table_tokenizer, max_query_length, min_row, max_tables):
+    def prepare(self, data_dir, data_type, query_tokenizer, table_tokenizer, max_query_length, min_row):
         if self._check_exists():
             return
 
@@ -286,10 +256,10 @@ class QueryTableDataset(Dataset):
                                                                   )
                     query_dict[qid] = query_tokenized
 
-                caption_rep, column_reps = encode_tables(jsonStr, self.is_slice, query, table_tokenizer, min_row)
+                table_reps, caption_rep = encode_tables(jsonStr, self.is_slice, query, table_tokenizer, min_row)
                 # ret: 0, 1, 2
                 rel = 1 if rel > 0 else 0
-                data.append((query_dict[qid], column_reps, [caption_rep] * len(column_reps), rel))
+                data.append((query_dict[qid], table_reps, [caption_rep] * len(table_reps), rel))
                 
         # Save
         with open(os.path.join(processed_dir, self.ids_file), 'wb') as f:
@@ -305,7 +275,7 @@ class QueryTableDataset(Dataset):
 
 
 def query_table_collate_fn(batch):
-    query, columns, caption, rel = zip(*batch)
+    query, tables, caption, rel = zip(*batch)
     input_ids, token_type_ids, attention_mask = [], [], []
     for q in query:
         input_ids.append(q["input_ids"].squeeze())
@@ -316,7 +286,7 @@ def query_table_collate_fn(batch):
              "token_type_ids": torch.stack(token_type_ids),
              "attention_mask": torch.stack(attention_mask)}
 
-    return query, columns, caption, torch.Tensor(rel)
+    return query, tables, caption, torch.Tensor(rel)
 
 
 def infer_column_type(value):
@@ -329,13 +299,13 @@ def infer_column_type(value):
 
 class TableDataset(Dataset):
     def __init__(self, data_dir: str = '.data', data_type: str = 'test', table_tokenizer=None, 
-                 min_row=10, max_tables=10, prepare=False, is_slice=True):
+                 min_row=10, prepare=False, is_slice=True):
         self.data_dir = data_dir
-        self.table_file = f'{data_type}_{min_row}_{max_tables}.table'
+        self.table_file = f'{data_type}_{min_row}.table'
         self.is_slice = is_slice
 
         if prepare:
-            self.prepare(data_type, table_tokenizer, min_row, max_tables)
+            self.prepare(data_type, table_tokenizer, min_row)
 
         self.tables = torch.load(os.path.join(self.processed_folder, self.table_file))
 
@@ -345,7 +315,7 @@ class TableDataset(Dataset):
     def __getitem__(self, index):
         return self.tables[index]
 
-    def prepare(self, data_type, table_tokenizer, min_row, max_tables):
+    def prepare(self, data_type, table_tokenizer, min_row):
         if self._check_exists():
             return
 
@@ -373,9 +343,8 @@ class TableDataset(Dataset):
                 rel = jsonStr['rel']
 
                 # Table Encode
-                caption_rep, column_reps = encode_tables(jsonStr, self.is_slice, query, table_tokenizer, min_row)
-                tables.append((f"{tableId}", column_reps, [caption_rep] * len(column_reps)))
-                # tables.append([f"{tableId}", column_reps,  p])
+                table_reps, caption_rep = encode_tables(jsonStr, self.is_slice, query, table_tokenizer, min_row)
+                tables.append((f"{tableId}", table_reps, [caption_rep] * len(table_reps)))
 
                 # for i, column_rep in enumerate(column_reps, 1):
                 #     tables.append([f"{tableId}-{i}", column_rep, caption_rep])
@@ -393,8 +362,8 @@ class TableDataset(Dataset):
 
 
 def table_collate_fn(batch):
-    tid, column, caption = zip(*batch)
-    return tid, column, caption
+    tid, tables, caption = zip(*batch)
+    return tid, tables, caption
 
 
 class QueryDataset(Dataset):
