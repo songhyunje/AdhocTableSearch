@@ -45,7 +45,8 @@ def save_TREC_format(args, fn, ranked_dict):
             for idx, result in enumerate(sorted_results):
                 tid, rel, score = result
                 if args.hnsw_index:
-                    f.write(f"{qid}\t{0}\t{tid}\t{rel}\t{idx + 1}\tfaiss\n")
+                    # f.write(f"{qid}\t{0}\t{tid}\t{rel}\t{idx + 1}\tfaiss\n")
+                    f.write(f"{qid}\t{0}\t{tid}\t{rel}\t{len(sorted_results)-idx}\tfaiss\n")
                 else:
                     f.write(f"{qid}\t{0}\t{tid}\t{rel}\t{score}\tfaiss\n")
 

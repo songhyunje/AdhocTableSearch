@@ -34,8 +34,9 @@ from table_bert import Table, Column, TableBertModel
 
 def encode_tables(table_json, is_slice, query, table_tokenizer, min_row):
     rel = table_json['rel']
-    raw_json = json.loads(table_json['table']['raw_json'])
+    tid = table_json['table']['tid']
 
+    raw_json = json.loads(table_json['table']['raw_json'])
     textBeforeTable = raw_json['textBeforeTable']  # 추후
     textAfterTable = raw_json['textAfterTable']    # 추후
 
@@ -91,13 +92,14 @@ def encode_tables(table_json, is_slice, query, table_tokenizer, min_row):
     #             row_list.append([re.sub(html_pattern, '', row).strip() for row in rows])
     #         body = row_list
 
-    caption = caption if caption else title
-    caption_rep = table_tokenizer.tokenize(caption)
+    # caption = caption if caption else title
+    context = f'{title} {caption}'.strip()
+    context_rep = table_tokenizer.tokenize(context)
 
     if is_slice:
-        table_reps = slice_table(title, header, body, caption, table_tokenizer, min_row)
+        table_reps = slice_table(tid, header, body, table_tokenizer, min_row)
     else:
-        table_reps = [Table(id=caption,
+        table_reps = [Table(id=tid,
                             header=[Column(h.strip(), infer_column_type(h)) for h in header],
                             data=body
                            ).tokenize(table_tokenizer)]
@@ -106,17 +108,15 @@ def encode_tables(table_json, is_slice, query, table_tokenizer, min_row):
     if len(table_reps) > 5:# 
         table_reps = table_reps[:5]
 
-    return table_reps, caption_rep
+    return table_reps, context_rep
 
 
-def slice_table(title, heading, data, caption, table_tokenizer, min_row):
+def slice_table(tid, heading, data, table_tokenizer, min_row):
     table_reps = []
 
-    # min_row = 20         # 최소 5개의 행은 있어야 함
-    # max_table_nums = 10  # 테이블은 최대 10개로 나뉘어짐
     for i in range(0, len(data), min_row):
         rows = data[i:i+min_row]
-        table_rep = Table(id=title,
+        table_rep = Table(id=f'{tid}_{i}',
                            header=[Column(h.strip(), infer_column_type(h)) for h in heading],
                            data=rows
                            ).tokenize(table_tokenizer)
@@ -244,7 +244,6 @@ class QueryTableDataset(Dataset):
                 tableId = jsonStr['docid'] # tableId -> tid
                 query = jsonStr['query']
                 qid = jsonStr['qid']
-                tid = jsonStr['docid']
                 rel = jsonStr['rel']
 
                 if qid not in query_dict:
@@ -260,7 +259,7 @@ class QueryTableDataset(Dataset):
                 # ret: 0, 1, 2
                 rel = 1 if rel > 0 else 0
                 data.append((query_dict[qid], table_reps, [caption_rep] * len(table_reps), rel))
-                
+
         # Save
         with open(os.path.join(processed_dir, self.ids_file), 'wb') as f:
             torch.save(data, f)
@@ -339,15 +338,11 @@ class TableDataset(Dataset):
                 tableId = jsonStr['docid']    # tableId -> tid
                 query = jsonStr['query']
                 qid = jsonStr['qid']
-                tid = jsonStr['docid']
                 rel = jsonStr['rel']
 
                 # Table Encode
                 table_reps, caption_rep = encode_tables(jsonStr, self.is_slice, query, table_tokenizer, min_row)
                 tables.append((f"{tableId}", table_reps, [caption_rep] * len(table_reps)))
-
-                # for i, column_rep in enumerate(column_reps, 1):
-                #     tables.append([f"{tableId}-{i}", column_rep, caption_rep])
 
         # Save
         with open(os.path.join(processed_dir, self.table_file), 'wb') as f:

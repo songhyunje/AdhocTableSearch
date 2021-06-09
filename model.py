@@ -22,54 +22,44 @@ class QueryTableMatcher(pl.LightningModule):
             nn.Tanh(),
             nn.Linear(128, 1)
         )
-        # self.linear = nn.Linear(768, 1)
-        # self.linear = nn.Sequential(
-        #     nn.Linear(768, 1),
-        #     nn.Sigmoid()
-        # )
 
     def forward(self, query, tables, captions):
-        # use cls vector 
-        query_tokens = self.Tmodel.bert(**query)[0]            # B x Q x d
-        # query = self.norm(query_tokens[:, 0, :])  # B x d
-        query = F.normalize(query_tokens[:, 0, :], p=2, dim=1)  # B x d
+        query = self.query_forward(query)   # B x d 
+        table = self.table_forward(tables, captions)  # B x d
+        similarity = torch.mm(query, table.transpose(0, 1))   # B x B
+        # print(torch.mm(query, table.transpose(0, 1)).shape)
+        return similarity
         # for loop is terrible,
         # but it has no choice but to use it!
-        reps = []  # B x 768
-        for q, table, caption in zip(query, tables, captions):
-            context_encoding, table_encoding, _ = self.Tmodel.encode(contexts=caption, tables=table)
-            H = self.norm(context_encoding[:, 0, :] + torch.mean(table_encoding, dim=1))
-            # H = context_encoding[:, 0, :] + torch.mean(table_encoding, dim=1)
+        # reps = []  # B x 768
+        # for q, table, caption in zip(query, tables, captions):
+        #     context_encoding, table_encoding, _ = self.Tmodel.encode(contexts=caption, tables=table)
+        #     H = self.norm(context_encoding[:, 0, :] + torch.mean(table_encoding, dim=1))
+        #     # H = context_encoding[:, 0, :] + torch.mean(table_encoding, dim=1)
 
-            # 이 부분을 밖으로 빼면 될 듯 한데...
-            # H = q * concat_encoding  # subN x 768
-            # print(H.shape)
+        #     # Max pooling
+        #     # M, _ = torch.max(H, 0)   # T(# of table) x 768
+        #     # reps.append(M)
 
-            # Max pooling
-            # M, _ = torch.max(H, 0)   # T(# of table) x 768
-            # reps.append(M)
+        #     # Attention pooling
+        #     A = self.attention(H)         # subN x 1
+        #     A = torch.transpose(A, 1, 0)  # 1 x subN
+        #     A = F.softmax(A, dim=1)       # softmax over subN
 
-            # Attention pooling
-            A = self.attention(H)         # subN x 1
-            A = torch.transpose(A, 1, 0)  # 1 x subN
-            A = F.softmax(A, dim=1)       # softmax over subN
-
-            M = torch.mm(A, H) # 1 x 768
-            t_norm = F.normalize(M, p=2, dim=1)
-            # print(q_norm.shape)
-            # print(t_norm.shape)
-            # print(torch.mm(q_norm, t_norm.transpose(0, 1)).shape)
-            reps.append(torch.mm(q.unsqueeze(0), t_norm.transpose(0, 1)).squeeze(0))
-            # reps.append(self.linear(q * self.norm(M)).squeeze(0))
-            # reps.append(M.squeeze(0))
-
-        return torch.stack(reps)   # B x 1
+        #     M = torch.mm(A, H) # 1 x 768
+        #     t_norm = F.normalize(M, p=2, dim=1)
+        #     # print(torch.mm(q_norm, t_norm.transpose(0, 1)).shape)
+        #     reps.append(torch.mm(q.unsqueeze(0), t_norm.transpose(0, 1)).squeeze(0))
+        #     # reps.append(self.linear(q * self.norm(M)).squeeze(0))
+        #     # reps.append(M.squeeze(0))
+        # return torch.stack(reps)   # B x 1
         # return self.linear(torch.stack(reps))   # B x 1
 
     def training_step(self, batch, batch_idx):
         query, tables, captions, rel = batch
         outputs = self(query, tables, captions)
-        loss = F.binary_cross_entropy_with_logits(outputs, rel.unsqueeze(1))
+        # loss = F.binary_cross_entropy_with_logits(outputs, rel.unsqueeze(1))
+        loss = F.mse_loss(outputs, rel.unsqueeze(1))
         # logit_matrix = torch.cat([tp_cos.unsqueeze(1), tn_cos.unsqueeze(1)], dim=1)  # [B, 2]
         # lsm = F.log_softmax(logit_matrix, dim=1)
         # loss = -1.0 * lsm[:, 0]
@@ -87,19 +77,22 @@ class QueryTableMatcher(pl.LightningModule):
         # tp_cos, tn_cos = self(*batch)
         # nbatch = tp_cos.size(0)
         # target = torch.ones(nbatch, device=self.device)
-        loss = F.binary_cross_entropy_with_logits(outputs, rel.unsqueeze(1))
+        # loss = F.binary_cross_entropy_with_logits(outputs, rel.unsqueeze(1))
+        loss = F.mse_loss(outputs, rel.unsqueeze(1))
         # loss = self.criterion(tp_cos, tn_cos, target)
         self.log('val_loss', loss.mean())
         return loss.mean()
 
     def query_forward(self, query):
-        # return self.norm(self.Tmodel.bert(**query)[1])  # B x d
-        query_tokens = self.Tmodel.bert(**query)[0]            # B x Q x d
+        # use cls vector 
+        query_tokens = self.Tmodel.bert(**query)[0]             # B x Q x d
+        return F.normalize(query_tokens[:, 0, :], p=2, dim=1)	# B x d
         # return self.norm(query_tokens[:, 0, :])  # B x d
-        return F.normalize(query_tokens[:, 0, :], p=2, dim=1)
 
     def table_forward(self, tables, captions):
         reps = []
+        # for loop is terrible, 
+        # TODO: remove loop using mask and max_sub_tables 
         for table, caption in zip(tables, captions):
             context_encoding, table_encoding, _ = self.Tmodel.encode(contexts=caption, tables=table)
             H = self.norm(context_encoding[:, 0, :] + torch.mean(table_encoding, dim=1))
@@ -111,7 +104,7 @@ class QueryTableMatcher(pl.LightningModule):
 
             # M = self.norm(torch.mm(A, H)) # 1 x 768
             M = torch.mm(A, H)
-            M = F.normalize(M, p=2, dim=1)
+            M = F.normalize(M, p=2, dim=1)  # 1 x 768
             reps.append(M.squeeze(0))
 
         return torch.stack(reps)
@@ -155,7 +148,7 @@ class QueryTableMatcher(pl.LightningModule):
         #                     type=float, help="The initial learning rate for table model.")
         parser.add_argument("--weight_decay", default=0.0, type=float, help="Weight decay if we apply some.")
         parser.add_argument("--adam_epsilon", default=1e-8, type=float, help="Epsilon for Adam optimizer.")
-        parser.add_argument("--warmup", default=0, type=int, help="Linear warmup over warmup_steps.")
+        parser.add_argument("--warmup", default=100, type=int, help="Linear warmup over warmup_steps.")
         # parser.add_argument("--qmodel_warmup", default=5000, type=int, help="Linear warmup over warmup_steps.")
         # parser.add_argument("--tmodel_warmup", default=2000, type=int, help="Linear warmup over warmup_steps.")
         parser.add_argument("--max_epochs", default=5, type=int, help="Number of training epochs")
