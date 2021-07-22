@@ -1,11 +1,8 @@
-import itertools
 import json
 import os
 import random
-from math import ceil
 from collections import defaultdict
 from pathlib import Path
-import re
 
 import torch
 from torch.utils.data import DataLoader, Dataset
@@ -13,26 +10,7 @@ from torch.utils.data import DataLoader, Dataset
 from table_bert import Table, Column, TableBertModel
 
 
-# html_pattern = re.compile(r'<\w+ [^>]*>([^<]+)</\w+>')
-# tag_pattern = re.compile(r'<.*?>')
-# link_pattern = re.compile(r'\[.*?\|.*?\]')
-
-
-# def get_negative_rank(path=Path('.data/bench/1/rel0_rank'), threshold=0.0811):
-#     rank_dict = {}
-#     with open(path, 'r') as f:
-#         lines = f.readlines()[:3200]
-#         for line in lines:
-#             qid, rel, tid, overlap_ratio = line.split('\t')
-#             if float(overlap_ratio) >= threshold:
-#                 try:
-#                     rank_dict[qid].append(tid)
-#                 except:
-#                     rank_dict[qid] = [tid]
-#     return rank_dict
-
-
-def encode_tables(table_json, is_slice, query, table_tokenizer, min_row):
+def encode_tables(table_json, is_slice, table_tokenizer, min_row):
     rel = table_json['rel']
     tid = table_json['table']['tid']
 
@@ -41,7 +19,6 @@ def encode_tables(table_json, is_slice, query, table_tokenizer, min_row):
     textAfterTable = raw_json['textAfterTable']    # 추후
 
     title = raw_json['pageTitle']
-    # caption = re.sub(r'[^a-zA-Z0-9]', ' ', raw_json['title']).strip()  # Caption 역할
     caption = raw_json['title'].strip()  # Caption 역할
     tableOrientation = raw_json['tableOrientation'].strip()  # [HORIZONTAL, VERTICAL]
 
@@ -56,41 +33,6 @@ def encode_tables(table_json, is_slice, query, table_tokenizer, min_row):
         body = list(map(list, zip(*body)))  # transpose
 
     header = body[headerRowIndex] if hasHeader else [''] * len(body[0])
-    # Heading preprocessing + link remove
-    # heading_str = ' '.join(heading)
-    # if html_pattern.search(heading_str):
-    #     if link_pattern.search(heading_str):  # 같이 있는 경우
-    #         heading = [re.sub(tag_pattern, '', column).strip() for column in heading]
-    #         for idx, column in enumerate(heading):
-    #             if link_pattern.search(column):
-    #                 real_text = link_pattern.search(column).group().split('|')[-1][:-1].strip()
-    #                 heading[idx] = real_text
-    #     else:
-    #         heading = [re.sub(html_pattern, '', column).strip() for column in heading]
-
-    # Row preporcessing + link remove
-    # cell_sum_str = ''
-    # for rows in body:
-    #     cell_sum_str += ' '.join(rows)
-    # cell_sum_str = ' '.join([row for rows in body])
-
-    # if html_pattern.search(cell_sum_str):
-    #     if link_pattern.search(cell_sum_str):  # 같이 있으면
-    #         for i, rows in enumerate(body):
-    #             for j, cell in enumerate(rows):
-    #                 if link_pattern.search(cell):
-    #                     cell = re.sub(tag_pattern, '', cell).strip()
-    #                     real_text = link_pattern.search(cell).group().split('|')[-1][:-1]
-    #                     body[i][j] = real_text
-    #                 else:
-    #                     cell = re.sub(html_pattern, '', cell).strip()
-    #                     body[i][j] = cell
-
-    #     else:
-    #         row_list = []
-    #         for rows in body:
-    #             row_list.append([re.sub(html_pattern, '', row).strip() for row in rows])
-    #         body = row_list
 
     # caption = caption if caption else title
     context = f'{title} {caption}'.strip()
@@ -105,8 +47,8 @@ def encode_tables(table_json, is_slice, query, table_tokenizer, min_row):
                            ).tokenize(table_tokenizer)]
 
     # memory issues!
-    if len(table_reps) > 5:# 
-        table_reps = table_reps[:5]
+    if len(table_reps) > 3:
+        table_reps = table_reps[:3]
 
     return table_reps, context_rep
 
@@ -122,81 +64,6 @@ def slice_table(tid, heading, data, table_tokenizer, min_row):
                            ).tokenize(table_tokenizer)
         table_reps.append(table_rep)
 
-    # if len(data) <= min_row:  # 테이블이 최소행 보다 작은 경우
-    #     column_rep = Table(id=title,
-    #                        header=[Column(h.strip(), infer_column_type(h)) for h in heading],
-    #                        data=data
-    #                        ).tokenize(table_tokenizer)
-    #     table_rep_list.append(column_rep)
-    # else:
-    #     row_n = max(min_row, ceil(len(data) / max_table))
-    #     slice_row_data = [data[i * row_n:(i + 1) * row_n] for i in range((len(data) + row_n - 1) // row_n)]
-    #     for rows in slice_row_data:
-    #         column_rep = Table(id=title,
-    #                            header=[Column(h.strip(), infer_column_type(h)) for h in heading],
-    #                            data=rows
-    #                            ).tokenize(table_tokenizer)
-    #         table_rep_list.append(column_rep)
-
-    # if len(data) <= min_row:  # 테이블이 최소행 보다 작은 경우
-    #     column_rep = Table(id=title,
-    #                        header=[Column(h.strip(), infer_column_type(h)) for h in heading],
-    #                        data=data
-    #                        ).tokenize(table_tokenizer)
-    #     table_rep_list.append(column_rep)
-    # else:
-    #     row_n = max(min_row, ceil(len(data) / max_table))
-    #     slice_row_data = [data[i * row_n:(i + 1) * row_n] for i in range((len(data) + row_n - 1) // row_n)]
-    #     for rows in slice_row_data:
-    #         column_rep = Table(id=title,
-    #                            header=[Column(h.strip(), infer_column_type(h)) for h in heading],
-    #                            data=rows
-    #                            ).tokenize(table_tokenizer)
-    #         table_rep_list.append(column_rep)
-
-        # row_n = max(min_row, ceil(len(data) / max_table_nums))
-        # slice_row_data = [data[i * row_n:(i + 1) * row_n] for i in range((len(data) + row_n - 1) // row_n)]
-        # if rel == 0:  # Negative
-        #     for rows in slice_row_data:
-        #         column_rep = Table(id=title,
-        #                            header=[Column(h.strip(), infer_column_type(h)) for h in heading],
-        #                            data=rows
-        #                            ).tokenize(table_tokenizer)
-        #         table_rep_list.append((rel, column_rep))
-
-        # else:  # Positive
-        #     query_tokens = [token.strip() for token in query.split(' ')]
-        #     is_always_postive = False
-        #     for token in query_tokens:
-        #         if token in caption:
-        #             is_always_postive = True
-        #             break
-
-        #     if is_always_postive:  # caption에 포함되어있는 경우
-        #         for rows in slice_row_data:
-        #             column_rep = Table(id=title,
-        #                                header=[Column(h.strip(), 'text') for h in heading],
-        #                                data=rows
-        #                                ).tokenize(table_tokenizer)
-        #             table_rep_list.append((rel, column_rep))
-        #     else:
-        #         for rows in slice_row_data:
-        #             column_rep = Table(id=title,
-        #                                header=[Column(h.strip(), 'text') for h in heading],
-        #                                data=rows
-        #                                ).tokenize(table_tokenizer)
-        #             modify_rel = '0'
-        #             # Row data를 하나의 string으로
-        #             cell_string_sum = ''
-        #             for row in rows:
-        #                 cell_string_sum += ' '.join(row)
-        #             # Query tokens과 overlap
-        #             for token in query_tokens:
-        #                 if token in cell_string_sum:
-        #                     modify_rel = '1'
-        #                     break
-        #             table_rep_list.append((modify_rel, column_rep))
-
     return table_reps
 
 
@@ -205,19 +72,42 @@ class QueryTableDataset(Dataset):
                  query_tokenizer=None, table_tokenizer=None, max_query_length=7,
                  min_row=30, prepare=False, is_slice=True):
         self.data_dir = data_dir
-        self.ids_file = f'{data_type}_{min_row}.pair'
+        self.query_file = f'{data_type}.query'
+        self.table_file = f'{data_type}.table'
+        self.pos_rel_file = f'{data_type}.rel.pos'
+        self.neg_rel_file = f'{data_type}.rel.neg'
         self.data_type = data_type
+        self.hard_num = 1
         self.is_slice = is_slice
         if prepare:
             self.prepare(data_dir, data_type, query_tokenizer, table_tokenizer, max_query_length, min_row=min_row)
 
-        self.data = torch.load(os.path.join(self.processed_folder, self.ids_file))
+        self.query_dict = torch.load(os.path.join(self.processed_folder, self.query_file))
+        self.table_dict = torch.load(os.path.join(self.processed_folder, self.table_file))
+        self.pos_rel = torch.load(os.path.join(self.processed_folder, self.pos_rel_file))
+
+        # hard static negative
+        self.neg_rel = torch.load(os.path.join(self.processed_folder, self.neg_rel_file))
+
+        # # of unique query 
+        self.qids = [(qid, tid) for qid, tids in self.pos_rel.items() for tid in tids]
 
     def __len__(self):
-        return len(self.data)
+        return len(self.qids)
 
     def __getitem__(self, index):
-        return self.data[index]
+        qid, tid = self.qids[index]
+        query = self.query_dict[qid]
+        table = self.table_dict[tid]
+
+        # hard static negative
+        # hard_tids = random.sample(self.neg_rel[qid], self.hard_num)
+        # hard_tables = [self.table_dict[hard_tid] for hard_tid in hard_tids]
+        # return qid, query, tid, table, hard_tids, hard_tables
+
+        hard_tid = random.choice(self.neg_rel[qid])
+        hard_table = self.table_dict[hard_tid]
+        return qid, query, tid, table, hard_tid, hard_table
 
     def prepare(self, data_dir, data_type, query_tokenizer, table_tokenizer, max_query_length, min_row):
         if self._check_exists():
@@ -231,7 +121,9 @@ class QueryTableDataset(Dataset):
         print('Processing...')
 
         query_dict = defaultdict()
-        data = []
+        table_dict = defaultdict()
+        pos_rel_dict = defaultdict(list)
+        neg_rel_dict = defaultdict(list)
         path = Path(data_dir + '/' + data_type + '.jsonl')
 
         with open(path) as f:
@@ -239,11 +131,10 @@ class QueryTableDataset(Dataset):
                 if not line.strip():
                     break
 
-                # 테이블 기본 Meta data 파싱
                 jsonStr = json.loads(line)
-                tableId = jsonStr['docid'] # tableId -> tid
                 query = jsonStr['query']
                 qid = jsonStr['qid']
+                tid = jsonStr['docid'] # docid == talbe[tid]
                 rel = jsonStr['rel']
 
                 if qid not in query_dict:
@@ -255,22 +146,74 @@ class QueryTableDataset(Dataset):
                                                                   )
                     query_dict[qid] = query_tokenized
 
-                table_reps, caption_rep = encode_tables(jsonStr, self.is_slice, query, table_tokenizer, min_row)
-                # ret: 0, 1, 2
-                rel = 1 if rel > 0 else 0
-                data.append((query_dict[qid], table_reps, [caption_rep] * len(table_reps), rel))
+                if tid not in table_dict:
+                    table_reps, caption_rep = encode_tables(jsonStr, self.is_slice, table_tokenizer, min_row)
+                    table_dict[tid] = (table_reps, [caption_rep] * len(table_reps))
+               
+                if rel > 0:
+                    pos_rel_dict[qid].append(tid)
+                else:
+                    neg_rel_dict[qid].append(tid)
+                # data[qid].append((query_dict[qid], table_reps, [caption_rep] * len(table_reps), rel))
 
-        # Save
-        with open(os.path.join(processed_dir, self.ids_file), 'wb') as f:
-            torch.save(data, f)
+        # sort by rel
+        for qid in pos_rel_dict:
+            pos_rel_dict[qid].sort(key=lambda tup: tup[1], reverse=True)
+
+        for qid in neg_rel_dict:
+            neg_rel_dict[qid].sort(key=lambda tup: tup[1], reverse=True)
+
+        # Save 
+        with open(os.path.join(processed_dir, self.query_file), 'wb') as f:
+            torch.save(query_dict, f)
+
+        with open(os.path.join(processed_dir, self.table_file), 'wb') as f:
+            torch.save(table_dict, f)
+
+        with open(os.path.join(processed_dir, self.pos_rel_file), 'wb') as f:
+            torch.save(pos_rel_dict, f)
+
+        with open(os.path.join(processed_dir, self.neg_rel_file), 'wb') as f:
+            torch.save(neg_rel_dict, f)
         print('Done!')
+
 
     @property
     def processed_folder(self):
         return os.path.join(self.data_dir, 'processed')
 
     def _check_exists(self):
-        return os.path.exists(os.path.join(self.processed_folder, self.ids_file))
+        return os.path.exists(os.path.join(self.processed_folder, self.table_file))
+
+
+def triple_collate_function(pos_rel_dict):
+    def collate_function(batch):
+        query_ids, queries, table_ids, tables, hard_table_ids, hard_tables = zip(*batch)
+        input_ids, token_type_ids, attention_mask = [], [], []
+        for q in queries:
+            input_ids.append(q["input_ids"].squeeze())
+            token_type_ids.append(q["token_type_ids"].squeeze())
+            attention_mask.append(q["attention_mask"].squeeze())
+
+        query = {"input_ids": torch.stack(input_ids),
+                 "token_type_ids": torch.stack(token_type_ids),
+                 "attention_mask": torch.stack(attention_mask)}
+
+        tables = list(zip(*tables))
+        hard_tables = list(zip(*hard_tables))
+
+        # rearranged_tables = []
+        # for items in zip(*tables):
+        #     rearranged_tables.append([item[0] for item in items])
+
+        # rearranged_hard_tables = []
+        # for items in zip(*hard_tables):
+        #     rearranged_hard_tables.append([item[0] for item in items])
+
+        rel_pair_mask = [[1 if tid not in pos_rel_dict[qid] else 0 for tid in table_ids] for qid in query_ids]
+        hard_pair_mask = [[1 if tid not in pos_rel_dict[qid] else 0 for tid in hard_table_ids] for qid in query_ids]
+        return query, tables, hard_tables, torch.FloatTensor(rel_pair_mask), torch.FloatTensor(hard_pair_mask)
+    return collate_function 
 
 
 def query_table_collate_fn(batch):
@@ -341,7 +284,7 @@ class TableDataset(Dataset):
                 rel = jsonStr['rel']
 
                 # Table Encode
-                table_reps, caption_rep = encode_tables(jsonStr, self.is_slice, query, table_tokenizer, min_row)
+                table_reps, caption_rep = encode_tables(jsonStr, self.is_slice, table_tokenizer, min_row)
                 tables.append((f"{tableId}", table_reps, [caption_rep] * len(table_reps)))
 
         # Save
@@ -451,11 +394,11 @@ if __name__ == "__main__":
                                 table_tokenizer=table_tokenizer,
                                 prepare=True,
                                 )
+    data_collator = triple_collate_function(dataset.pos_rel)
     dataloader = DataLoader(dataset,
                             batch_size=2,
-                            collate_fn=query_table_collate_fn)
+                            collate_fn=data_collator)
 
-    for _ in range(1):
-        for d in dataloader:
-            print(d)
-            break
+    for d in dataloader:
+        print(d)
+        break

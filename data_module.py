@@ -3,7 +3,7 @@ import argparse
 import pytorch_lightning as pl
 from torch.utils.data import DataLoader, random_split
 
-from dataset import QueryTableDataset, query_table_collate_fn
+from dataset import QueryTableDataset, triple_collate_function
 from table_bert import TableBertModel
 
 
@@ -39,19 +39,19 @@ class QueryTableDataModule(pl.LightningDataModule):
                                                                int(len(table_full) * 0.1)])
 
     def train_dataloader(self):
+        data_collator = triple_collate_function(self.train.dataset.pos_rel)
         return DataLoader(self.train,
                           batch_size=self.train_batch_size,
                           shuffle=True,
-                          collate_fn=query_table_collate_fn,
-                          num_workers=4,
-                          pin_memory=True)
+                          collate_fn=data_collator,
+                          num_workers=8)
 
     def val_dataloader(self):
+        data_collator = triple_collate_function(self.valid.dataset.pos_rel)
         return DataLoader(self.valid,
                           batch_size=self.valid_batch_size,
-                          collate_fn=query_table_collate_fn,
-                          num_workers=4,
-                          )
+                          collate_fn=data_collator,
+                          num_workers=8)
 
 
 if __name__ == "__main__":
