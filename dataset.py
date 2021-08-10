@@ -46,10 +46,6 @@ def encode_tables(table_json, is_slice, table_tokenizer, min_row):
                             data=body
                            ).tokenize(table_tokenizer)]
 
-    # memory issues!
-    if len(table_reps) > 3:
-        table_reps = table_reps[:3]
-
     return table_reps, context_rep
 
 
@@ -73,7 +69,7 @@ class QueryTableDataset(Dataset):
                  min_row=30, prepare=False, is_slice=True):
         self.data_dir = data_dir
         self.query_file = f'{data_type}.query'
-        self.table_file = f'{data_type}.table'
+        self.table_file = f'{data_type}-{min_row}.table'
         self.pos_rel_file = f'{data_type}.rel.pos'
         self.neg_rel_file = f'{data_type}.rel.neg'
         self.data_type = data_type
@@ -100,11 +96,12 @@ class QueryTableDataset(Dataset):
         query = self.query_dict[qid]
         table = self.table_dict[tid]
 
-        # hard static negative
+        # hard static negatives
         # hard_tids = random.sample(self.neg_rel[qid], self.hard_num)
         # hard_tables = [self.table_dict[hard_tid] for hard_tid in hard_tids]
         # return qid, query, tid, table, hard_tids, hard_tables
 
+        # hard static negative
         hard_tid = random.choice(self.neg_rel[qid])
         hard_table = self.table_dict[hard_tid]
         return qid, query, tid, table, hard_tid, hard_table
@@ -134,7 +131,7 @@ class QueryTableDataset(Dataset):
                 jsonStr = json.loads(line)
                 query = jsonStr['query']
                 qid = jsonStr['qid']
-                tid = jsonStr['docid'] # docid == talbe[tid]
+                tid = jsonStr['docid'] # docid == tid
                 rel = jsonStr['rel']
 
                 if qid not in query_dict:
@@ -148,13 +145,14 @@ class QueryTableDataset(Dataset):
 
                 if tid not in table_dict:
                     table_reps, caption_rep = encode_tables(jsonStr, self.is_slice, table_tokenizer, min_row)
+                    if len(table_reps) > 10:
+                        table_reps = table_reps[:10]
                     table_dict[tid] = (table_reps, [caption_rep] * len(table_reps))
                
                 if rel > 0:
                     pos_rel_dict[qid].append(tid)
                 else:
                     neg_rel_dict[qid].append(tid)
-                # data[qid].append((query_dict[qid], table_reps, [caption_rep] * len(table_reps), rel))
 
         # sort by rel
         for qid in pos_rel_dict:
@@ -243,19 +241,21 @@ class TableDataset(Dataset):
     def __init__(self, data_dir: str = '.data', data_type: str = 'test', table_tokenizer=None, 
                  min_row=10, prepare=False, is_slice=True):
         self.data_dir = data_dir
-        self.table_file = f'{data_type}_{min_row}.table'
+        self.table_file = f'{data_type}-{min_row}.table'
         self.is_slice = is_slice
 
         if prepare:
             self.prepare(data_type, table_tokenizer, min_row)
 
-        self.tables = torch.load(os.path.join(self.processed_folder, self.table_file))
+        self.table_dict = torch.load(os.path.join(self.processed_folder, self.table_file))
+        self.tids = list(self.table_dict.keys())
 
     def __len__(self):
-        return len(self.tables)
+        return len(self.tids)
 
     def __getitem__(self, index):
-        return self.tables[index]
+        tid = self.tids[index]
+        return tid, self.table_dict[tid]
 
     def prepare(self, data_type, table_tokenizer, min_row):
         if self._check_exists():
@@ -267,8 +267,7 @@ class TableDataset(Dataset):
             raise RuntimeError('Tokenizers are not found.' +
                                ' You must set table_tokenizer')
         # print('Processing...')
-
-        tables = []
+        table_dict = defaultdict()
         path = Path(self.data_dir + '/' + data_type + '.jsonl')
 
         with open(path) as f:
@@ -278,18 +277,19 @@ class TableDataset(Dataset):
 
                 # 테이블 기본 Meta data 파싱
                 jsonStr = json.loads(line)
-                tableId = jsonStr['docid']    # tableId -> tid
-                query = jsonStr['query']
-                qid = jsonStr['qid']
-                rel = jsonStr['rel']
+                tid = jsonStr['docid']    # tableId -> tid
+                # query = jsonStr['query']
+                # qid = jsonStr['qid']
+                # rel = jsonStr['rel']
 
                 # Table Encode
-                table_reps, caption_rep = encode_tables(jsonStr, self.is_slice, table_tokenizer, min_row)
-                tables.append((f"{tableId}", table_reps, [caption_rep] * len(table_reps)))
+                if tid not in table_dict:
+                    table_reps, caption_rep = encode_tables(jsonStr, self.is_slice, table_tokenizer, min_row)
+                    table_dict[tid] = (table_reps, [caption_rep] * len(table_reps))
 
         # Save
         with open(os.path.join(processed_dir, self.table_file), 'wb') as f:
-            torch.save(tables, f)
+            torch.save(table_dict, f)
 
     @property
     def processed_folder(self):
@@ -300,8 +300,9 @@ class TableDataset(Dataset):
 
 
 def table_collate_fn(batch):
-    tid, tables, caption = zip(*batch)
-    return tid, tables, caption
+    tid, tables = zip(*batch)
+    tables = list(zip(*tables))
+    return tid, tables
 
 
 class QueryDataset(Dataset):

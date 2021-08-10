@@ -16,10 +16,10 @@ class QueryTableMatcher(pl.LightningModule):
         self.save_hyperparameters()
         self.tabert = TableBertModel.from_pretrained(self.hparams.tabert_path, self.hparams.config_file)
 
-        self.table_linear = nn.Linear(table_model.config.hidden_size, 128)
-        self.query_emb_head = nn.Linear(table_model.config.hidden_size, 128)
+        self.table_linear = nn.Linear(self.tabert.config.hidden_size, 128)
+        self.query_emb_head = nn.Linear(self.tabert.config.hidden_size, 128)
         # self.table_emb_head = nn.Linear(128, 128)
-        self.norm = nn.LayerNorm(128)
+        # self.norm = nn.LayerNorm(128)
 
         # attention
         # self.attention = nn.Sequential(
@@ -55,9 +55,8 @@ class QueryTableMatcher(pl.LightningModule):
     def query_forward(self, query):
         # use cls vector 
         query_tokens = self.tabert.bert(**query)[0]             # B x Q x d
-        return self.norm(self.query_emb_head(query_tokens[:, 0, :]))
-        # return F.normalize(query_tokens[:, 0, :], p=2, dim=1)	# B x d
-        # return self.norm(query_tokens[:, 0, :])  # B x d
+        # return self.norm(self.query_emb_head(query_tokens[:, 0, :]))
+        return F.normalize(self.query_emb_head(query_tokens[:, 0, :]), p=2, dim=1)	# B x d
 
     # def table_forward(self, tables):
     #     context_encoding, table_encoding, _ = self.tabert.encode(contexts=tables[1], tables=tables[0])
@@ -87,11 +86,11 @@ class QueryTableMatcher(pl.LightningModule):
             A = torch.transpose(A, 1, 0)  # 1 x subN
             A = F.softmax(A, dim=1)       # softmax over subN
 
-            M = self.norm(torch.mm(A, H)) # 1 x 768
+            # M = self.norm(torch.mm(A, H)) # 1 x 768
             # M = self.norm(self.table_emb_head(M))
 
             # M = torch.mm(A, H)
-            # M = F.normalize(M, p=2, dim=1)  # 1 x 768
+            M = F.normalize(torch.mm(A, H), p=2, dim=1)  # 1 x 768
             reps.append(M.squeeze(0))
 
         return torch.stack(reps)
@@ -130,7 +129,7 @@ class QueryTableMatcher(pl.LightningModule):
         parser.add_argument("--lr", default=1e-5, type=float, help="The initial learning rate")
         parser.add_argument("--weight_decay", default=0.01, type=float, help="Weight decay if we apply some.")
         parser.add_argument("--adam_epsilon", default=1e-8, type=float, help="Epsilon for Adam optimizer.")
-        parser.add_argument("--warmup", default=100, type=int, help="Linear warmup over warmup_steps.")
+        parser.add_argument("--warmup", default=0, type=int, help="Linear warmup over warmup_steps.")
         parser.add_argument("--reload_dataloaders_every_n_epochs", default=0, type=int, help="")
         parser.add_argument("--max_epochs", default=5, type=int, help="Number of training epochs")
         parser.add_argument("--min_row", default=10, type=int, help="Minimum number of rows")

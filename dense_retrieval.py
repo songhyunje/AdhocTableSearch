@@ -66,12 +66,13 @@ def add_generic_arguments(parser):
 
 def main(args):
     # Restoring Training State
-    model = QueryTableMatcher.load_from_checkpoint(args.ckpt_file, map_location=lambda storage, loc: storage.cuda(0))
+    # model = QueryTableMatcher.load_from_checkpoint(args.ckpt_file, map_location=lambda storage, loc: storage.cuda(0))
+    model = QueryTableMatcher.load_from_checkpoint(args.ckpt_file)
     model.to(device)
     model.eval()
+    model.freeze()
 
-    # vector_size = model_to_load.get_out_size()
-    vector_size = 768
+    vector_size = 128 
     if args.hnsw_index:
         index = DenseHNSWFlatIndexer(vector_size, args.index_buffer)
     else:
@@ -83,7 +84,7 @@ def main(args):
         else:
             index.deserialize_from('dtr')
     else:
-        table_tokenizer = model.Tmodel.tokenizer
+        table_tokenizer = model.tabert.tokenizer
         table_dataset = TableDataset(data_dir=args.data_dir, 
                                      data_type='test',
                                      table_tokenizer=table_tokenizer,
@@ -97,15 +98,10 @@ def main(args):
         table_vectors = []
         with torch.no_grad():
             for i, d in enumerate(dataloader, 1):
-                table_id, columns, captions = d 
-                values = model.table_forward(columns, captions)
+                table_id, tables = d
+                values = model.table_forward(tables)
                 for tid, vector in zip(table_id, values):
                     table_vectors.append((tid, vector.cpu().numpy())) 
-
-                # print(values.shape)
-                # for tid, vector in zip(table_id, values):
-                #     table_vectors.append((tid, vector.cpu().numpy())) 
-                # print(f"epoch: {i}")
         
         index.index_data(table_vectors)
         if args.hnsw_index:
@@ -113,7 +109,7 @@ def main(args):
         else:
             index.serialize('dtr')
 
-    query_tokenizer = model.Tmodel.tokenizer
+    query_tokenizer = model.tabert.tokenizer
     query_dataset = QueryDataset(data_dir=args.data_dir, 
                                  data_type='test',
                                  query_tokenizer=query_tokenizer,
